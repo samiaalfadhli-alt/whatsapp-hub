@@ -52,6 +52,7 @@ export class AccountManager {
         const saved = store.addMessage(accountId, message);
         this.io.emit("message:new", { accountId, message: saved });
         this.io.emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+        if (!message.fromMe) this.runAutoReplies(accountId, saved).catch(() => {});
       },
       onStatusUpdate: ({ chatId, messageId, status }) => {
         store.updateMessageStatus(accountId, chatId, messageId, status);
@@ -119,6 +120,46 @@ export class AccountManager {
     this.io.emit("message:new", { accountId, message: saved });
     this.io.emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
     return saved;
+  }
+
+  async sendMedia(accountId, chatId, file) {
+    const provider = this.providers.get(accountId);
+    if (!provider) throw new Error("الحساب غير متصل");
+    const message = await provider.sendMedia(chatId, file);
+    const saved = store.addMessage(accountId, message);
+    this.io.emit("message:new", { accountId, message: saved });
+    this.io.emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+    return saved;
+  }
+
+  // الردود التلقائية: قواعد كلمات مفتاحية + رسالة ترحيب/غياب
+  async runAutoReplies(accountId, message) {
+    if (message.isGroup) return;
+    const rules = store.listRules().filter((r) => r.enabled !== false && (!r.accountId || r.accountId === accountId));
+    if (!rules.length) return;
+    const text = (message.text || "").toLowerCase();
+    const history = store.listMessages(accountId, message.chatId);
+    const lastFromMe = [...history].reverse().find((m) => m.fromMe);
+    const hoursSinceReply = lastFromMe ? (Date.now() - lastFromMe.timestamp) / 36e5 : Infinity;
+    for (const rule of rules) {
+      let hit = false;
+      if (rule.trigger === "keyword") {
+        const kws = (rule.keywords || "").split(",").map((k) => k.trim().toLowerCase()).filter(Boolean);
+        hit = kws.some((k) => (rule.match === "exact" ? text === k : text.includes(k)));
+      } else if (rule.trigger === "welcome") {
+        hit = hoursSinceReply >= (Number(rule.cooldownHours) || 24);
+      } else if (rule.trigger === "away") {
+        const h = new Date().getHours();
+        const from = Number(rule.fromHour ?? 18), to = Number(rule.toHour ?? 8);
+        const outside = from < to ? h >= from && h < to : h >= from || h < to;
+        hit = outside && hoursSinceReply >= (Number(rule.cooldownHours) || 12);
+      }
+      if (!hit) continue;
+      const name = message.chatName || message.chatId.split("@")[0];
+      const reply = (rule.reply || "").replaceAll("{name}", name);
+      if (reply.trim()) await this.sendText(accountId, message.chatId, reply);
+      if (rule.stop !== false) break;
+    }
   }
 
   cloudProviderByPhoneNumberId(phoneNumberId) {

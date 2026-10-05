@@ -117,3 +117,51 @@ export function sessionDir(accountId) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
+
+// ---------- الوسائط ----------
+export function mediaDir(accountId) {
+  const dir = path.join(DATA_DIR, "media", accountId);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function saveMedia(accountId, messageId, buffer, mimetype, fileName) {
+  const ext = (fileName && path.extname(fileName)) || mimeToExt(mimetype);
+  const safeId = messageId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const name = `${safeId}${ext}`;
+  fs.writeFileSync(path.join(mediaDir(accountId), name), buffer);
+  return { url: `/media/${accountId}/${name}`, mimetype, fileName: fileName || name, size: buffer.length };
+}
+
+export function mimeToExt(mimetype = "") {
+  const map = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif",
+    "video/mp4": ".mp4", "audio/ogg; codecs=opus": ".ogg", "audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+    "application/pdf": ".pdf",
+  };
+  return map[mimetype] || map[mimetype.split(";")[0]] || ".bin";
+}
+
+// ---------- الردود الجاهزة ----------
+const TEMPLATES_FILE = path.join(DATA_DIR, "templates.json");
+export function listTemplates() { return readJson(TEMPLATES_FILE, []); }
+export function saveTemplate(t) {
+  const all = listTemplates();
+  const idx = all.findIndex((x) => x.id === t.id);
+  if (idx === -1) all.push(t); else all[idx] = { ...all[idx], ...t };
+  writeJson(TEMPLATES_FILE, all);
+  return all.find((x) => x.id === t.id);
+}
+export function deleteTemplate(id) { writeJson(TEMPLATES_FILE, listTemplates().filter((x) => x.id !== id)); }
+
+// ---------- الردود التلقائية ----------
+const RULES_FILE = path.join(DATA_DIR, "auto-replies.json");
+export function listRules() { return readJson(RULES_FILE, []); }
+export function saveRule(r) {
+  const all = listRules();
+  const idx = all.findIndex((x) => x.id === r.id);
+  if (idx === -1) all.push(r); else all[idx] = { ...all[idx], ...r };
+  writeJson(RULES_FILE, all);
+  return all.find((x) => x.id === r.id);
+}
+export function deleteRule(id) { writeJson(RULES_FILE, listRules().filter((x) => x.id !== id)); }

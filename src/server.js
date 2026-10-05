@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import express from "express";
 import cookieParser from "cookie-parser";
+import multer from "multer";
 import { Server as SocketServer } from "socket.io";
 import * as store from "./store.js";
 import { AccountManager } from "./manager.js";
@@ -19,6 +20,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new SocketServer(server);
 const manager = new AccountManager(io);
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
@@ -83,6 +85,41 @@ app.post("/api/accounts/:id/send", wrap(async (req, res) => {
   res.json(await manager.sendText(req.params.id, chatId, text.trim()));
 }));
 
+app.post("/api/accounts/:id/send-media", upload.single("file"), wrap(async (req, res) => {
+  const { chatId, caption } = req.body || {};
+  if (!chatId || !req.file) throw new Error("الرقم والملف مطلوبان");
+  const fileName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+  res.json(await manager.sendMedia(req.params.id, chatId, { buffer: req.file.buffer, mimetype: req.file.mimetype, fileName, caption: caption?.trim() || "" }));
+}));
+
+// ---------- الردود الجاهزة ----------
+app.get("/api/templates", (req, res) => res.json(store.listTemplates()));
+app.post("/api/templates", wrap(async (req, res) => {
+  const { id, title, text } = req.body || {};
+  if (!title?.trim() || !text?.trim()) throw new Error("العنوان والنص مطلوبان");
+  res.json(store.saveTemplate({ id: id || crypto.randomUUID(), title: title.trim(), text: text.trim() }));
+}));
+app.delete("/api/templates/:id", (req, res) => { store.deleteTemplate(req.params.id); res.json({ ok: true }); });
+
+// ---------- الردود التلقائية ----------
+app.get("/api/rules", (req, res) => res.json(store.listRules()));
+app.post("/api/rules", wrap(async (req, res) => {
+  const r = req.body || {};
+  if (!["keyword", "welcome", "away"].includes(r.trigger)) throw new Error("نوع القاعدة غير صحيح");
+  if (!r.reply?.trim()) throw new Error("نص الرد مطلوب");
+  if (r.trigger === "keyword" && !r.keywords?.trim()) throw new Error("الكلمات المفتاحية مطلوبة");
+  res.json(store.saveRule({
+    id: r.id || crypto.randomUUID(), name: r.name?.trim() || "", trigger: r.trigger, accountId: r.accountId || "",
+    keywords: r.keywords || "", match: r.match === "exact" ? "exact" : "contains", reply: r.reply.trim(),
+    cooldownHours: Number(r.cooldownHours) || undefined, fromHour: r.fromHour !== undefined && r.fromHour !== "" ? Number(r.fromHour) : undefined,
+    toHour: r.toHour !== undefined && r.toHour !== "" ? Number(r.toHour) : undefined, enabled: r.enabled !== false && r.enabled !== "false",
+  }));
+}));
+app.delete("/api/rules/:id", (req, res) => { store.deleteRule(req.params.id); res.json({ ok: true }); });
+
+// ملفات الوسائط المحفوظة
+app.use("/media", (req, res, next) => (isAuthed(req) ? next() : res.sendStatus(401)), express.static(path.join(process.env.DATA_DIR || path.resolve("data"), "media")));
+
 // صندوق موحّد لكل الحسابات
 app.get("/api/inbox", (req, res) => {
   const all = [];
@@ -101,14 +138,14 @@ app.get("/webhooks/cloud", (req, res) => {
   res.sendStatus(403);
 });
 app.post("/webhooks/cloud", (req, res) => {
+  res.sendStatus(200); // Meta تتوقع ردًا سريعًا؛ المعالجة تتم بعده
   for (const entry of req.body?.entry || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
       const target = manager.cloudProviderByPhoneNumberId(value.metadata?.phone_number_id);
-      if (target) target.provider.handleWebhook(value);
+      if (target) target.provider.handleWebhook(value).catch(() => {});
     }
   }
-  res.sendStatus(200);
 });
 
 // ---------- الواجهة ----------

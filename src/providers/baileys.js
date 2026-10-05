@@ -4,6 +4,7 @@ import baileys, {
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
   jidNormalizedUser,
+  downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
@@ -74,11 +75,13 @@ export class BaileysProvider {
       }
     });
 
-    this.sock.ev.on("messages.upsert", ({ messages, type }) => {
+    this.sock.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify" && type !== "append") return;
       for (const m of messages) {
         const parsed = this.parseMessage(m);
-        if (parsed) this.events.onMessage(parsed);
+        if (!parsed) continue;
+        if (parsed.mediaType) await this.attachMedia(m, parsed).catch(() => {});
+        this.events.onMessage(parsed);
       }
     });
 
@@ -121,7 +124,9 @@ export class BaileysProvider {
       (content.contactMessage && "👤 جهة اتصال") ||
       "";
     if (!text && !Object.keys(content).length) return null;
+    const mediaType = content.imageMessage ? "image" : content.videoMessage ? "video" : content.audioMessage ? "audio" : content.documentMessage ? "document" : content.stickerMessage ? "sticker" : null;
     return {
+      mediaType,
       id: m.key.id,
       chatId: jid,
       chatName: m.pushName || undefined,
@@ -134,9 +139,36 @@ export class BaileysProvider {
     };
   }
 
+  async attachMedia(m, parsed) {
+    const buffer = await downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: this.sock.updateMediaMessage });
+    const content = m.message || {};
+    const inner = content.imageMessage || content.videoMessage || content.audioMessage || content.documentMessage || content.stickerMessage || {};
+    parsed.media = store.saveMedia(this.account.id, parsed.id, buffer, inner.mimetype || "", inner.fileName);
+  }
+
+  jidOf(chatId) {
+    return chatId.includes("@") ? chatId : `${chatId.replace(/\D/g, "")}@s.whatsapp.net`;
+  }
+
+  async sendMedia(chatId, { buffer, mimetype, fileName, caption }) {
+    if (!this.sock) throw new Error("الحساب غير متصل");
+    const jid = this.jidOf(chatId);
+    let payload, mediaType;
+    if (mimetype.startsWith("image/")) { payload = { image: buffer, caption }; mediaType = "image"; }
+    else if (mimetype.startsWith("video/")) { payload = { video: buffer, caption }; mediaType = "video"; }
+    else if (mimetype.startsWith("audio/")) { payload = { audio: buffer, mimetype }; mediaType = "audio"; }
+    else { payload = { document: buffer, mimetype, fileName, caption }; mediaType = "document"; }
+    const sent = await this.sock.sendMessage(jid, payload);
+    const media = store.saveMedia(this.account.id, sent.key.id, buffer, mimetype, fileName);
+    return {
+      id: sent.key.id, chatId: jid, fromMe: true, text: caption || fileName || "", mediaType, media,
+      timestamp: Date.now(), status: "sent", isGroup: jid.endsWith("@g.us"), sender: "me",
+    };
+  }
+
   async sendText(chatId, text) {
     if (!this.sock) throw new Error("الحساب غير متصل");
-    const jid = chatId.includes("@") ? chatId : `${chatId.replace(/\D/g, "")}@s.whatsapp.net`;
+    const jid = this.jidOf(chatId);
     const sent = await this.sock.sendMessage(jid, { text });
     return {
       id: sent.key.id,

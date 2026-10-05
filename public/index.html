@@ -23,7 +23,10 @@
   <aside class="sidebar">
     <header class="sidebar-head">
       <div class="brand"><span class="dot"></span> WhatsApp Hub</div>
-      <button id="btn-add" class="btn small">+ إضافة رقم</button>
+      <div class="head-actions">
+        <button id="btn-settings" class="btn small" title="الردود الجاهزة والتلقائية">⚙️</button>
+        <button id="btn-add" class="btn small">+ إضافة رقم</button>
+      </div>
     </header>
 
     <section class="accounts">
@@ -55,8 +58,12 @@
         </div>
       </header>
       <div id="messages" class="messages"></div>
+      <div id="templates-pop" class="templates-pop hidden"></div>
       <form id="send-form" class="send-form">
-        <textarea id="send-text" rows="1" placeholder="اكتب رسالة..." required></textarea>
+        <button class="btn icon" type="button" id="btn-templates" title="ردود جاهزة">⚡</button>
+        <button class="btn icon" type="button" id="btn-attach" title="إرفاق ملف">📎</button>
+        <input id="attach-input" type="file" class="hidden" />
+        <textarea id="send-text" rows="1" placeholder="اكتب رسالة... (اكتب / للردود الجاهزة)"></textarea>
         <button class="btn primary" type="submit">إرسال</button>
       </form>
     </div>
@@ -109,6 +116,74 @@
       <button class="btn primary" type="submit">إرسال</button>
     </div>
   </form>
+</dialog>
+
+<!-- نافذة إرسال مرفق -->
+<dialog id="attach-dialog" class="dialog">
+  <form id="attach-form" method="dialog">
+    <h2>إرسال مرفق</h2>
+    <div id="attach-preview" class="attach-preview"></div>
+    <label>تعليق (اختياري)<input name="caption" /></label>
+    <div class="dialog-actions">
+      <button class="btn" type="button" id="attach-cancel">إلغاء</button>
+      <button class="btn primary" type="submit">إرسال</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- نافذة الإعدادات: الردود الجاهزة والتلقائية -->
+<dialog id="settings-dialog" class="dialog wide">
+  <div class="settings">
+    <div class="settings-head">
+      <h2>الإعدادات</h2>
+      <button class="btn" type="button" id="settings-close">إغلاق</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="templates">⚡ الردود الجاهزة</button>
+      <button class="tab" data-tab="rules">🤖 الردود التلقائية</button>
+    </div>
+
+    <section id="tab-templates" class="tab-panel">
+      <form id="template-form" class="inline-form">
+        <input type="hidden" name="id" />
+        <input name="title" placeholder="العنوان (مثال: الترحيب)" required />
+        <textarea name="text" rows="2" placeholder="نص الرد… يمكنك استخدام {name} لاسم العميل" required></textarea>
+        <div class="dialog-actions"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="template-reset">جديد</button></div>
+      </form>
+      <ul id="templates-list" class="items"></ul>
+    </section>
+
+    <section id="tab-rules" class="tab-panel hidden">
+      <form id="rule-form" class="inline-form">
+        <input type="hidden" name="id" />
+        <input name="name" placeholder="اسم القاعدة" />
+        <div class="row">
+          <label>النوع
+            <select name="trigger" id="rule-trigger">
+              <option value="keyword">كلمة مفتاحية</option>
+              <option value="welcome">ترحيب (أول رسالة من العميل)</option>
+              <option value="away">خارج أوقات العمل</option>
+            </select>
+          </label>
+          <label>الرقم<select name="accountId" id="rule-account"><option value="">كل الأرقام</option></select></label>
+        </div>
+        <div class="row rule-keyword">
+          <label>الكلمات (افصل بفاصلة)<input name="keywords" placeholder="السعر, الأسعار, كم" /></label>
+          <label>المطابقة<select name="match"><option value="contains">تحتوي</option><option value="exact">مطابقة تامة</option></select></label>
+        </div>
+        <div class="row rule-away hidden">
+          <label>من الساعة<input name="fromHour" type="number" min="0" max="23" value="18" /></label>
+          <label>إلى الساعة<input name="toHour" type="number" min="0" max="23" value="8" /></label>
+        </div>
+        <div class="row rule-cooldown hidden">
+          <label>لا يتكرر خلال (ساعات)<input name="cooldownHours" type="number" min="1" value="24" /></label>
+        </div>
+        <textarea name="reply" rows="2" placeholder="نص الرد التلقائي… {name} لاسم العميل" required></textarea>
+        <div class="dialog-actions"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="rule-reset">جديد</button></div>
+      </form>
+      <ul id="rules-list" class="items"></ul>
+    </section>
+  </div>
 </dialog>
 
 <div id="toast" class="toast hidden"></div>

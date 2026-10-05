@@ -206,9 +206,18 @@ async function openChat(accountId, chatId) {
   scrollBottom();
   $("#send-text").focus();
 }
+function renderMedia(m) {
+  if (!m.media?.url) return "";
+  const u = esc(m.media.url);
+  if (m.mediaType === "image" || m.mediaType === "sticker") return `<a href="${u}" target="_blank"><img src="${u}" alt="" loading="lazy" /></a>`;
+  if (m.mediaType === "video") return `<video src="${u}" controls preload="metadata"></video>`;
+  if (m.mediaType === "audio") return `<audio src="${u}" controls preload="metadata"></audio>`;
+  return `<a class="doc" href="${u}" download="${esc(m.media.fileName || "")}">📄 <span>${esc(m.media.fileName || "ملف")}</span></a>`;
+}
 function renderMessage(m) {
   const sender = m.isGroup && !m.fromMe ? `<span class="sender">${esc(m.sender?.split("@")[0] || "")}</span>` : "";
-  return `<div class="msg ${m.fromMe ? "out" : ""}" data-id="${esc(m.id)}">${sender}${esc(m.text)}<span class="meta">${fmtTime(m.timestamp)} <span class="tick">${m.fromMe ? TICKS[m.status] ?? "" : ""}</span></span></div>`;
+  const text = m.media?.url && m.mediaType !== "document" && (m.text === "📷 صورة" || m.text === "🎬 فيديو" || m.text === "🎤 رسالة صوتية" || m.text === "🩵 ملصق") ? "" : m.text;
+  return `<div class="msg ${m.fromMe ? "out" : ""}" data-id="${esc(m.id)}">${sender}${renderMedia(m)}${esc(text)}<span class="meta">${fmtTime(m.timestamp)} <span class="tick">${m.fromMe ? TICKS[m.status] ?? "" : ""}</span></span></div>`;
 }
 const scrollBottom = () => { const el = $("#messages"); el.scrollTop = el.scrollHeight; };
 
@@ -222,6 +231,167 @@ $("#send-form").addEventListener("submit", async (e) => {
 });
 $("#send-text").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#send-form").requestSubmit(); }
+});
+
+// ---------- المرفقات ----------
+let pendingFile = null;
+$("#btn-attach").addEventListener("click", () => $("#attach-input").click());
+$("#attach-input").addEventListener("change", (e) => { if (e.target.files[0]) stageFile(e.target.files[0]); e.target.value = ""; });
+$("#attach-cancel").addEventListener("click", () => $("#attach-dialog").close());
+function stageFile(file) {
+  if (!state.current) return toast("افتح محادثة أولًا", true);
+  pendingFile = file;
+  const prev = $("#attach-preview");
+  if (file.type.startsWith("image/")) prev.innerHTML = `<img src="${URL.createObjectURL(file)}" alt="" />`;
+  else prev.innerHTML = `<div>📄 ${esc(file.name)} <span class="muted small-text">(${(file.size / 1024).toFixed(0)} KB)</span></div>`;
+  $("#attach-dialog").showModal();
+}
+$("#attach-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!pendingFile || !state.current) return;
+  const fd = new FormData();
+  fd.append("file", pendingFile);
+  fd.append("chatId", state.current.chatId);
+  fd.append("caption", new FormData(e.target).get("caption") || "");
+  $("#attach-dialog").close();
+  e.target.reset();
+  toast("جاري الإرسال…");
+  try {
+    const res = await fetch(`/api/accounts/${state.current.accountId}/send-media`, { method: "POST", body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "فشل الإرسال");
+  } catch (err) { toast(err.message, true); }
+  pendingFile = null;
+});
+// سحب وإفلات ولصق الصور
+const msgsEl = $("#messages");
+msgsEl.addEventListener("dragover", (e) => { e.preventDefault(); msgsEl.classList.add("drop-hint"); });
+msgsEl.addEventListener("dragleave", () => msgsEl.classList.remove("drop-hint"));
+msgsEl.addEventListener("drop", (e) => { e.preventDefault(); msgsEl.classList.remove("drop-hint"); if (e.dataTransfer.files[0]) stageFile(e.dataTransfer.files[0]); });
+$("#send-text").addEventListener("paste", (e) => {
+  const f = [...(e.clipboardData?.files || [])][0];
+  if (f) { e.preventDefault(); stageFile(f); }
+});
+
+// ---------- الردود الجاهزة ----------
+state.templates = [];
+state.tplSel = 0;
+async function loadTemplates() { state.templates = await api("/templates"); }
+function applyVars(text) {
+  const chat = state.chats.find((c) => c.id === state.current?.chatId && c.accountId === state.current?.accountId);
+  return text.replaceAll("{name}", chat?.name || state.current?.chatId?.split("@")[0] || "");
+}
+function showTemplates(filter = "") {
+  const pop = $("#templates-pop");
+  const q = filter.toLowerCase();
+  const list = state.templates.filter((t) => !q || t.title.toLowerCase().includes(q) || t.text.toLowerCase().includes(q));
+  if (!list.length) { pop.classList.add("hidden"); return; }
+  state.tplSel = Math.min(state.tplSel, list.length - 1);
+  pop.innerHTML = list.map((t, i) => `<div class="t ${i === state.tplSel ? "sel" : ""}" data-id="${t.id}"><b>${esc(t.title)}</b><span>${esc(t.text)}</span></div>`).join("");
+  pop.classList.remove("hidden");
+  pop._list = list;
+}
+function hideTemplates() { $("#templates-pop").classList.add("hidden"); state.tplSel = 0; }
+function pickTemplate(t) {
+  $("#send-text").value = applyVars(t.text);
+  hideTemplates();
+  $("#send-text").focus();
+}
+$("#btn-templates").addEventListener("click", () => {
+  if (!state.templates.length) return toast("لا توجد ردود جاهزة — أضفها من ⚙️", true);
+  $("#templates-pop").classList.contains("hidden") ? showTemplates() : hideTemplates();
+});
+$("#templates-pop").addEventListener("click", (e) => {
+  const el = e.target.closest(".t");
+  if (el) pickTemplate(state.templates.find((t) => t.id === el.dataset.id));
+});
+$("#send-text").addEventListener("input", (e) => {
+  const v = e.target.value;
+  if (v.startsWith("/")) showTemplates(v.slice(1)); else hideTemplates();
+});
+$("#send-text").addEventListener("keydown", (e) => {
+  const pop = $("#templates-pop");
+  if (pop.classList.contains("hidden")) return;
+  const list = pop._list || [];
+  if (e.key === "ArrowDown") { e.preventDefault(); state.tplSel = (state.tplSel + 1) % list.length; showTemplates($("#send-text").value.slice(1)); }
+  if (e.key === "ArrowUp") { e.preventDefault(); state.tplSel = (state.tplSel - 1 + list.length) % list.length; showTemplates($("#send-text").value.slice(1)); }
+  if (e.key === "Tab" || (e.key === "Enter" && $("#send-text").value.startsWith("/"))) { e.preventDefault(); e.stopImmediatePropagation(); if (list[state.tplSel]) pickTemplate(list[state.tplSel]); }
+  if (e.key === "Escape") hideTemplates();
+}, true);
+
+// ---------- الإعدادات ----------
+state.rules = [];
+const TRIGGER_AR = { keyword: "كلمة مفتاحية", welcome: "ترحيب", away: "خارج الدوام" };
+$("#btn-settings").addEventListener("click", async () => {
+  await Promise.all([loadTemplates(), loadRules()]);
+  renderTemplatesList(); renderRulesList(); fillRuleAccounts();
+  $("#settings-dialog").showModal();
+});
+$("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
+document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${b.dataset.tab}`));
+}));
+
+function renderTemplatesList() {
+  $("#templates-list").innerHTML = state.templates.length
+    ? state.templates.map((t) => `<li data-id="${t.id}"><div class="body"><b>${esc(t.title)}</b><p>${esc(t.text)}</p></div><button class="btn icon" data-act="edit">✏️</button><button class="btn icon danger" data-act="del">🗑</button></li>`).join("")
+    : `<li class="muted">لا توجد ردود جاهزة بعد</li>`;
+}
+$("#template-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target).entries());
+  try { await api("/templates", { method: "POST", body }); e.target.reset(); await loadTemplates(); renderTemplatesList(); toast("تم الحفظ"); }
+  catch (err) { toast(err.message, true); }
+});
+$("#template-reset").addEventListener("click", () => $("#template-form").reset());
+$("#templates-list").addEventListener("click", async (e) => {
+  const li = e.target.closest("li[data-id]"); const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!li || !act) return;
+  const t = state.templates.find((x) => x.id === li.dataset.id);
+  if (act === "edit") { const f = $("#template-form"); f.id.value = t.id; f.title.value = t.title; f.text.value = t.text; f.title.focus(); }
+  if (act === "del" && confirm(`حذف "${t.title}"؟`)) { await api(`/templates/${t.id}`, { method: "DELETE" }); await loadTemplates(); renderTemplatesList(); }
+});
+
+async function loadRules() { state.rules = await api("/rules"); }
+function fillRuleAccounts() {
+  $("#rule-account").innerHTML = `<option value="">كل الأرقام</option>` + state.accounts.map((a) => `<option value="${a.id}">${esc(a.label)}</option>`).join("");
+}
+function renderRulesList() {
+  $("#rules-list").innerHTML = state.rules.length
+    ? state.rules.map((r) => {
+      const acc = r.accountId ? accountOf(r.accountId)?.label || "؟" : "كل الأرقام";
+      const detail = r.trigger === "keyword" ? `الكلمات: ${esc(r.keywords)}` : r.trigger === "away" ? `من ${r.fromHour ?? 18}:00 إلى ${r.toHour ?? 8}:00` : `مرة كل ${r.cooldownHours || 24} ساعة`;
+      return `<li data-id="${r.id}" class="${r.enabled === false ? "off" : ""}"><div class="body"><b>${esc(r.name || TRIGGER_AR[r.trigger])}<span class="pill">${TRIGGER_AR[r.trigger]}</span><span class="pill">${esc(acc)}</span></b><p>${detail}\n↩ ${esc(r.reply)}</p></div>
+        <button class="btn icon" data-act="toggle" title="${r.enabled === false ? "تفعيل" : "تعطيل"}">${r.enabled === false ? "▶️" : "⏸"}</button><button class="btn icon" data-act="edit">✏️</button><button class="btn icon danger" data-act="del">🗑</button></li>`;
+    }).join("")
+    : `<li class="muted">لا توجد قواعد بعد</li>`;
+}
+function syncRuleFields() {
+  const t = $("#rule-trigger").value;
+  $(".rule-keyword").classList.toggle("hidden", t !== "keyword");
+  $(".rule-away").classList.toggle("hidden", t !== "away");
+  $(".rule-cooldown").classList.toggle("hidden", t === "keyword");
+}
+$("#rule-trigger").addEventListener("change", syncRuleFields);
+$("#rule-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target).entries());
+  try { await api("/rules", { method: "POST", body }); e.target.reset(); syncRuleFields(); await loadRules(); renderRulesList(); toast("تم الحفظ"); }
+  catch (err) { toast(err.message, true); }
+});
+$("#rule-reset").addEventListener("click", () => { $("#rule-form").reset(); syncRuleFields(); });
+$("#rules-list").addEventListener("click", async (e) => {
+  const li = e.target.closest("li[data-id]"); const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!li || !act) return;
+  const r = state.rules.find((x) => x.id === li.dataset.id);
+  if (act === "edit") {
+    const f = $("#rule-form");
+    for (const k of ["id", "name", "trigger", "accountId", "keywords", "match", "reply", "cooldownHours", "fromHour", "toHour"]) if (f[k] && r[k] !== undefined) f[k].value = r[k];
+    syncRuleFields(); f.reply.focus();
+  }
+  if (act === "toggle") { await api("/rules", { method: "POST", body: { ...r, enabled: r.enabled === false } }); await loadRules(); renderRulesList(); }
+  if (act === "del" && confirm("حذف القاعدة؟")) { await api(`/rules/${r.id}`, { method: "DELETE" }); await loadRules(); renderRulesList(); }
 });
 
 // ---------- رسالة جديدة ----------
@@ -294,5 +464,5 @@ socket.on("connect_error", () => showLogin());
   $("#app").classList.remove("hidden");
   state.accounts = await api("/accounts");
   renderAccounts();
-  await loadChats();
+  await Promise.all([loadChats(), loadTemplates()]);
 })();
