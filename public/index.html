@@ -24,7 +24,8 @@
     <header class="sidebar-head">
       <div class="brand"><span class="dot"></span> WhatsApp Hub</div>
       <div class="head-actions">
-        <button id="btn-settings" class="btn small" title="الردود الجاهزة والتلقائية">⚙️</button>
+        <button id="btn-leads" class="btn small" title="الاستفسارات">🔔 <span id="leads-count" class="badge hidden"></span></button>
+        <button id="btn-settings" class="btn small" title="الإعدادات">⚙️</button>
         <button id="btn-add" class="btn small">+ إضافة رقم</button>
       </div>
     </header>
@@ -141,7 +142,26 @@
     <div class="tabs">
       <button class="tab active" data-tab="templates">⚡ الردود الجاهزة</button>
       <button class="tab" data-tab="rules">🤖 الردود التلقائية</button>
+      <button class="tab" data-tab="alerts">🔔 تنبيهات الاستفسارات</button>
     </div>
+
+    <section id="tab-alerts" class="tab-panel hidden">
+      <form id="alerts-form" class="inline-form">
+        <label class="check"><input type="checkbox" name="enabled" /> تفعيل التنبيهات</label>
+        <label>إيميل استقبال التنبيهات<input name="notifyEmail" type="email" placeholder="you@example.com" required /></label>
+        <label>الكلمات التي تُعتبر استفسارًا (افصل بفاصلة)<textarea name="keywords" rows="2"></textarea></label>
+        <div class="row">
+          <label class="check"><input type="checkbox" name="whatsapp" /> مراقبة واتساب (كل الأرقام)</label>
+          <label class="check"><input type="checkbox" name="email" /> مراقبة الإيميل الوارد</label>
+        </div>
+        <label>عدم تكرار التنبيه لنفس الشخص خلال (دقائق)<input name="cooldownMinutes" type="number" min="0" value="60" /></label>
+        <div id="alerts-status" class="muted small-text"></div>
+        <div class="dialog-actions">
+          <button class="btn primary" type="submit">حفظ</button>
+          <button class="btn" type="button" id="alerts-test">إرسال إيميل تجريبي</button>
+        </div>
+      </form>
+    </section>
 
     <section id="tab-templates" class="tab-panel">
       <form id="template-form" class="inline-form">
@@ -183,6 +203,23 @@
       </form>
       <ul id="rules-list" class="items"></ul>
     </section>
+  </div>
+</dialog>
+
+<!-- نافذة الاستفسارات -->
+<dialog id="leads-dialog" class="dialog wide">
+  <div class="settings">
+    <div class="settings-head">
+      <h2>🔔 الاستفسارات (الدورات والشهادات)</h2>
+      <button class="btn" type="button" id="leads-close">إغلاق</button>
+    </div>
+    <div class="tabs">
+      <button class="ltab active" data-f="new">جديدة</button>
+      <button class="ltab" data-f="contacted">تم التواصل</button>
+      <button class="ltab" data-f="done">منتهية</button>
+      <button class="ltab" data-f="all">الكل</button>
+    </div>
+    <ul id="leads-list" class="items"></ul>
   </div>
 </dialog>
 

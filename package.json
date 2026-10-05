@@ -16,7 +16,10 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
+    "imapflow": "^2.2.5",
+    "mailparser": "^3.9.36",
     "multer": "^2.4.0",
+    "nodemailer": "^7.0.13",
     "pino": "^9.5.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.4"

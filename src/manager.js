@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import * as store from "./store.js";
 import { BaileysProvider } from "./providers/baileys.js";
 import { CloudApiProvider } from "./providers/cloud.js";
+import { processIncoming } from "./alerts.js";
 
 export class AccountManager {
   constructor(io) {
@@ -52,7 +53,16 @@ export class AccountManager {
         const saved = store.addMessage(accountId, message);
         this.io.emit("message:new", { accountId, message: saved });
         this.io.emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
-        if (!message.fromMe) this.runAutoReplies(accountId, saved).catch(() => {});
+        if (!message.fromMe) {
+          this.runAutoReplies(accountId, saved).catch(() => {});
+          if (!message.isGroup) {
+            const account = store.getAccount(accountId);
+            processIncoming({
+              channel: "whatsapp", from: message.chatId.split("@")[0], fromName: message.chatName || "",
+              text: message.text, chatId: message.chatId, accountId, accountLabel: account?.label, accountPhone: account?.phone,
+            }, this.io).catch(() => {});
+          }
+        }
       },
       onStatusUpdate: ({ chatId, messageId, status }) => {
         store.updateMessageStatus(accountId, chatId, messageId, status);

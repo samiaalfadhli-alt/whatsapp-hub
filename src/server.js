@@ -10,6 +10,8 @@ import multer from "multer";
 import { Server as SocketServer } from "socket.io";
 import * as store from "./store.js";
 import { AccountManager } from "./manager.js";
+import * as alerts from "./alerts.js";
+import { EmailWatcher, imapConfigured } from "./providers/email-watcher.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -20,6 +22,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new SocketServer(server);
 const manager = new AccountManager(io);
+const emailWatcher = new EmailWatcher(io, (st) => io.emit("email:status", st));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
 app.use(express.json({ limit: "1mb" }));
@@ -117,6 +120,38 @@ app.post("/api/rules", wrap(async (req, res) => {
 }));
 app.delete("/api/rules/:id", (req, res) => { store.deleteRule(req.params.id); res.json({ ok: true }); });
 
+// ---------- تنبيهات الاستفسارات ----------
+app.get("/api/alerts/settings", (req, res) => res.json({
+  ...alerts.getSettings(),
+  smtpConfigured: alerts.mailerConfigured(),
+  imapConfigured: imapConfigured(),
+  imapUser: process.env.IMAP_USER || "",
+  emailStatus: emailWatcher.status, emailError: emailWatcher.error || null,
+}));
+app.post("/api/alerts/settings", wrap(async (req, res) => {
+  const b = req.body || {};
+  res.json(alerts.saveSettings({
+    enabled: b.enabled !== false && b.enabled !== "false",
+    notifyEmail: (b.notifyEmail || "").trim(),
+    keywords: (b.keywords || "").trim() || alerts.getSettings().keywords,
+    whatsapp: b.whatsapp !== false && b.whatsapp !== "false",
+    email: b.email !== false && b.email !== "false",
+    cooldownMinutes: Number(b.cooldownMinutes) >= 0 ? Number(b.cooldownMinutes) : 60,
+  }));
+}));
+app.post("/api/alerts/test", wrap(async (req, res) => {
+  const to = (req.body?.to || alerts.getSettings().notifyEmail || "").trim();
+  if (!to) throw new Error("حدد إيميل التنبيهات أولًا");
+  await alerts.sendTestEmail(to);
+  res.json({ ok: true });
+}));
+app.get("/api/leads", (req, res) => res.json(alerts.listLeads()));
+app.patch("/api/leads/:id", wrap(async (req, res) => {
+  const { status } = req.body || {};
+  if (!["new", "contacted", "done"].includes(status)) throw new Error("حالة غير صحيحة");
+  res.json(alerts.markLead(req.params.id, { status }));
+}));
+
 // ملفات الوسائط المحفوظة
 app.use("/media", (req, res, next) => (isAuthed(req) ? next() : res.sendStatus(401)), express.static(path.join(process.env.DATA_DIR || path.resolve("data"), "media")));
 
@@ -154,4 +189,5 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 server.listen(PORT, async () => {
   console.log(`WhatsApp Hub يعمل على http://localhost:${PORT}`);
   await manager.init();
+  emailWatcher.start().catch(() => {});
 });

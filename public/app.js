@@ -323,7 +323,7 @@ $("#send-text").addEventListener("keydown", (e) => {
 state.rules = [];
 const TRIGGER_AR = { keyword: "كلمة مفتاحية", welcome: "ترحيب", away: "خارج الدوام" };
 $("#btn-settings").addEventListener("click", async () => {
-  await Promise.all([loadTemplates(), loadRules()]);
+  await Promise.all([loadTemplates(), loadRules(), loadAlertSettings()]);
   renderTemplatesList(); renderRulesList(); fillRuleAccounts();
   $("#settings-dialog").showModal();
 });
@@ -394,6 +394,64 @@ $("#rules-list").addEventListener("click", async (e) => {
   if (act === "del" && confirm("حذف القاعدة؟")) { await api(`/rules/${r.id}`, { method: "DELETE" }); await loadRules(); renderRulesList(); }
 });
 
+// ---------- تنبيهات الاستفسارات ----------
+async function loadAlertSettings() {
+  const st = await api("/alerts/settings");
+  const f = $("#alerts-form");
+  f.enabled.checked = st.enabled; f.whatsapp.checked = st.whatsapp; f.email.checked = st.email;
+  f.notifyEmail.value = st.notifyEmail || ""; f.keywords.value = st.keywords || ""; f.cooldownMinutes.value = st.cooldownMinutes ?? 60;
+  const EMAIL_ST = { connected: "متصل ✅", connecting: "جاري الاتصال…", reconnecting: "إعادة الاتصال…", error: "خطأ ❌", not_configured: "غير مُعدّ", disconnected: "غير متصل" };
+  $("#alerts-status").innerHTML =
+    `إرسال الإيميل (SMTP): ${st.smtpConfigured ? "مُعدّ ✅" : "غير مُعدّ ❌ — أضف SMTP_HOST/USER/PASS في .env"}<br>` +
+    `مراقبة الإيميل (IMAP): ${st.imapConfigured ? `${esc(st.imapUser)} — ${EMAIL_ST[st.emailStatus] || st.emailStatus}${st.emailError ? " (" + esc(st.emailError) + ")" : ""}` : "غير مُعدّ — أضف IMAP_HOST/USER/PASS في .env"}`;
+}
+$("#alerts-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api("/alerts/settings", { method: "POST", body: { enabled: f.enabled.checked, whatsapp: f.whatsapp.checked, email: f.email.checked, notifyEmail: f.notifyEmail.value, keywords: f.keywords.value, cooldownMinutes: f.cooldownMinutes.value } });
+    toast("تم حفظ إعدادات التنبيهات");
+  } catch (err) { toast(err.message, true); }
+});
+$("#alerts-test").addEventListener("click", async () => {
+  try { await api("/alerts/test", { method: "POST", body: { to: $("#alerts-form").notifyEmail.value } }); toast("تم إرسال إيميل تجريبي ✅"); }
+  catch (err) { toast(err.message, true); }
+});
+
+state.leads = []; state.leadFilter = "new";
+async function loadLeads() { state.leads = await api("/leads"); updateLeadsBadge(); }
+function updateLeadsBadge() {
+  const n = state.leads.filter((l) => l.status === "new").length;
+  const b = $("#leads-count"); b.textContent = n; b.classList.toggle("hidden", !n);
+}
+function renderLeads() {
+  const list = state.leads.filter((l) => state.leadFilter === "all" || l.status === state.leadFilter);
+  $("#leads-list").innerHTML = list.length ? list.map((l) => `
+    <li class="lead" data-id="${l.id}">
+      <div class="body">
+        <b>${esc(l.fromName || l.from)} <span class="chan ${l.channel}">${l.channel === "whatsapp" ? "واتساب · " + esc(l.accountLabel || "") : "إيميل"}</span></b>
+        <div class="when">${new Date(l.timestamp).toLocaleString("ar")} · <span class="kw">${esc(l.matched.join("، "))}</span> · <span class="notified">${l.notified ? "📧 تم التنبيه" : l.notifyError ? "⚠️ " + esc(l.notifyError) : "بدون إيميل"}</span></div>
+        ${l.subject ? `<p><b>${esc(l.subject)}</b></p>` : ""}<p>${esc((l.text || "").slice(0, 300))}</p>
+      </div>
+      ${l.channel === "whatsapp" && l.accountId ? `<button class="btn icon" data-act="open" title="فتح المحادثة">💬</button>` : `<a class="btn icon" href="mailto:${esc(l.from)}" title="رد بالإيميل">✉️</a>`}
+      ${l.status !== "contacted" ? `<button class="btn icon" data-act="contacted" title="تم التواصل">☎️</button>` : ""}
+      ${l.status !== "done" ? `<button class="btn icon" data-act="done" title="إنهاء">✅</button>` : `<button class="btn icon" data-act="new" title="إعادة فتح">↩️</button>`}
+    </li>`).join("") : `<li class="muted">لا توجد استفسارات</li>`;
+}
+$("#btn-leads").addEventListener("click", async () => { await loadLeads(); renderLeads(); $("#leads-dialog").showModal(); });
+$("#leads-close").addEventListener("click", () => $("#leads-dialog").close());
+document.querySelectorAll(".ltab").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".ltab").forEach((x) => x.classList.toggle("active", x === b));
+  state.leadFilter = b.dataset.f; renderLeads();
+}));
+$("#leads-list").addEventListener("click", async (e) => {
+  const li = e.target.closest("li[data-id]"); const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!li || !act) return;
+  const l = state.leads.find((x) => x.id === li.dataset.id);
+  if (act === "open") { $("#leads-dialog").close(); state.selectedAccount = null; renderAccounts(); await loadChats(); openChat(l.accountId, l.chatId); return; }
+  await api(`/leads/${l.id}`, { method: "PATCH", body: { status: act } });
+  await loadLeads(); renderLeads();
+});
 // ---------- رسالة جديدة ----------
 $("#btn-new-msg").addEventListener("click", () => {
   if (!state.accounts.some((a) => a.status === "connected")) return toast("لا يوجد رقم متصل حاليًا", true);
@@ -455,6 +513,13 @@ socket.on("message:status", ({ accountId, chatId, messageId, status }) => {
   if (tick) tick.textContent = TICKS[status] ?? "";
 });
 socket.on("connect_error", () => showLogin());
+socket.on("lead:new", (lead) => {
+  state.leads.unshift(lead); updateLeadsBadge();
+  if ($("#leads-dialog").open) renderLeads();
+  toast(`🔔 استفسار جديد عن ${lead.matched[0]} من ${lead.fromName || lead.from} (${lead.channel === "whatsapp" ? "واتساب" : "إيميل"})`);
+});
+socket.on("email:status", () => { if ($("#settings-dialog").open) loadAlertSettings().catch(() => {}); });
+
 
 // ---------- بدء التشغيل ----------
 (async function boot() {
@@ -464,5 +529,5 @@ socket.on("connect_error", () => showLogin());
   $("#app").classList.remove("hidden");
   state.accounts = await api("/accounts");
   renderAccounts();
-  await Promise.all([loadChats(), loadTemplates()]);
+  await Promise.all([loadChats(), loadTemplates(), loadLeads()]);
 })();
