@@ -2,7 +2,6 @@ services:
   - type: web
     name: whatsapp-hub
     runtime: docker
-    rootDir: whatsapp-hub
     dockerfilePath: ./Dockerfile
     plan: starter
     healthCheckPath: /api/auth

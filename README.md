@@ -17,7 +17,7 @@
 
 ## التشغيل
 ```bash
-cd whatsapp-hub
+# داخل مجلد المشروع
 cp .env.example .env      # عدّل ADMIN_PASSWORD
 npm install
 npm start
