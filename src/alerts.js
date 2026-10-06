@@ -1,24 +1,9 @@
 // تنبيهات الاستفسارات: يكتشف رسائل الاستفسار عن الدورات/الشهادات ويرسل تنبيهًا بالإيميل
-import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
 import nodemailer from "nodemailer";
-
-const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
-const SETTINGS_FILE = path.join(DATA_DIR, "alerts.json");
-const LEADS_FILE = path.join(DATA_DIR, "leads.json");
-const MAX_LEADS = 2000;
+import { db, J, P, now, paginate, getSetting, setSetting } from "./db.js";
 
 const DEFAULT_KEYWORDS = "دورة, دورات, الدورة, الدورات, شهادة, شهادات, الشهادة, الشهادات, تدريب, تسجيل, course, courses, certificate, certification, training";
-
-function readJson(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return fallback; }
-}
-function writeJson(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify(value, null, 2));
-  fs.renameSync(`${file}.tmp`, file);
-}
 
 // ---------- الإعدادات ----------
 export function getSettings() {
@@ -29,31 +14,47 @@ export function getSettings() {
     whatsapp: true,
     email: true,
     cooldownMinutes: 60, // لا يُرسل تنبيهًا لنفس الشخص أكثر من مرة خلال هذه المدة
-    ...readJson(SETTINGS_FILE, {}),
+    ...(getSetting("alerts", {}) || {}),
   };
 }
 export function saveSettings(patch) {
   const next = { ...getSettings(), ...patch };
-  writeJson(SETTINGS_FILE, next);
+  setSetting("alerts", next);
   return next;
 }
 
 // ---------- سجل الاستفسارات ----------
-export function listLeads() { return readJson(LEADS_FILE, []); }
+const leadRow = (r) => r && ({
+  id: r.id, timestamp: r.timestamp, channel: r.channel, from: r.from_addr, fromName: r.from_name, subject: r.subject, text: r.text, matched: P(r.matched, []),
+  status: r.status, notified: !!r.notified, notifyError: r.notify_error, accountId: r.account_id, accountLabel: r.account_label, accountPhone: r.account_phone,
+  chatId: r.chat_id, mailbox: r.mailbox, contactId: r.contact_id,
+});
+export function listLeads({ status, accountIds, page, limit } = {}) {
+  const where = []; const args = [];
+  if (status && status !== "all") { where.push("status = ?"); args.push(status); }
+  if (accountIds) { where.push(`(channel = 'email' OR account_id IN (${accountIds.map(() => "?").join(",") || "''"}))`); args.push(...accountIds); }
+  const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const { limit: l, offset, page: p } = paginate({ page, limit: limit || 100, max: 500 });
+  const total = db.prepare(`SELECT COUNT(*) c FROM leads ${w}`).get(...args).c;
+  const rows = db.prepare(`SELECT * FROM leads ${w} ORDER BY timestamp DESC LIMIT ? OFFSET ?`).all(...args, l, offset).map(leadRow);
+  return { rows, total, page: p, limit: l };
+}
+export function getLead(id) { return leadRow(db.prepare("SELECT * FROM leads WHERE id = ?").get(id)) || null; }
 export function markLead(id, patch) {
-  const leads = listLeads();
-  const l = leads.find((x) => x.id === id);
-  if (!l) return null;
-  Object.assign(l, patch);
-  writeJson(LEADS_FILE, leads);
-  return l;
+  const sets = []; const args = [];
+  if (patch.status !== undefined) { sets.push("status = ?"); args.push(patch.status); }
+  if (patch.notified !== undefined) { sets.push("notified = ?"); args.push(patch.notified ? 1 : 0); }
+  if (patch.notifyError !== undefined) { sets.push("notify_error = ?"); args.push(patch.notifyError || null); }
+  if (sets.length) db.prepare(`UPDATE leads SET ${sets.join(", ")} WHERE id = ?`).run(...args, id);
+  return getLead(id);
 }
 function addLead(lead) {
-  const leads = listLeads();
-  leads.unshift(lead);
-  if (leads.length > MAX_LEADS) leads.length = MAX_LEADS;
-  writeJson(LEADS_FILE, leads);
-  return lead;
+  const contact = lead.channel === "whatsapp" ? db.prepare("SELECT id FROM contacts WHERE phone = ?").get(lead.from) : null;
+  db.prepare(`INSERT INTO leads (id, timestamp, channel, from_addr, from_name, subject, text, matched, status, notified, account_id, account_label, account_phone, chat_id, mailbox, contact_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', 0, ?, ?, ?, ?, ?, ?)`)
+    .run(lead.id, lead.timestamp, lead.channel, lead.from || "", lead.fromName || "", lead.subject || "", (lead.text || "").slice(0, 4000), J(lead.matched), lead.accountId || null, lead.accountLabel || null, lead.accountPhone || null, lead.chatId || null, lead.mailbox || null, contact?.id || null);
+  if (Math.random() < 0.01) db.prepare("DELETE FROM leads WHERE id IN (SELECT id FROM leads ORDER BY timestamp DESC LIMIT -1 OFFSET 5000)").run();
+  return getLead(lead.id);
 }
 
 // ---------- الكشف ----------

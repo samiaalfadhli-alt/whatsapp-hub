@@ -115,8 +115,8 @@ export class CloudApiProvider {
       let media;
       if (mediaObj?.id) {
         media = await this.downloadMedia(mediaObj.id)
-          .then(({ buffer, mimetype }) => store.saveMedia(this.account.id, m.id, buffer, mimetype || mediaObj.mime_type || "", m.document?.filename))
-          .catch(() => undefined);
+          .then(({ buffer, mimetype }) => store.saveMedia(this.account.id, m.id, buffer, mimetype || mediaObj.mime_type || "", m.document?.filename, { caption: mediaObj.caption || "", providerMediaId: mediaObj.id }))
+          .catch((e) => ({ state: /expired|410/i.test(e.message || "") ? "expired" : "failed", providerMediaId: mediaObj.id, mimetype: mediaObj.mime_type || "", fileName: m.document?.filename || "" }));
       }
       this.events.onMessage({
         mediaType,
@@ -133,10 +133,12 @@ export class CloudApiProvider {
       });
     }
     for (const s of value.statuses || []) {
+      const err = s.errors?.[0];
       this.events.onStatusUpdate({
         chatId: `${s.recipient_id}@s.whatsapp.net`,
         messageId: s.id,
         status: s.status,
+        reason: err ? `${err.title || err.message || ""}${err.error_data?.details ? ": " + err.error_data.details : ""} (${err.code})` : undefined,
       });
     }
   }

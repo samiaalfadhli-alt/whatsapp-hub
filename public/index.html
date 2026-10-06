@@ -2,270 +2,70 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>WhatsApp Hub</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<title>WhatsApp Hub CRM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css" />
+<link rel="stylesheet" href="/css/app.css" />
 </head>
 <body>
-<div id="login" class="screen hidden">
-  <form id="login-form" class="card">
-    <h1>WhatsApp Hub</h1>
-    <p class="muted">تسجيل الدخول</p>
-    <input id="login-username" placeholder="اسم المستخدم" autocomplete="username" required />
-    <input id="login-password" type="password" placeholder="كلمة المرور" autocomplete="current-password" required />
-    <button class="btn primary" type="submit">دخول</button>
-    <p id="login-error" class="error"></p>
+<!-- شاشات الدخول والإعداد -->
+<div id="auth-screen" class="auth hidden">
+  <form id="login-form" class="auth-card">
+    <div class="auth-logo"><span class="dot"></span> WhatsApp Hub</div>
+    <h1>تسجيل الدخول</h1>
+    <label>اسم المستخدم<input name="username" autocomplete="username" required /></label>
+    <label>كلمة المرور<input name="password" type="password" autocomplete="current-password" required /></label>
+    <button class="btn primary block" type="submit">دخول</button>
+    <p class="form-error" data-error></p>
+  </form>
+  <form id="setup-form" class="auth-card hidden">
+    <div class="auth-logo"><span class="dot"></span> WhatsApp Hub</div>
+    <h1>الإعداد الأول</h1>
+    <p class="muted">أنشئ حساب المدير العام (Super Admin)</p>
+    <label>اسمك<input name="name" required /></label>
+    <label>اسم المستخدم (إنجليزي)<input name="username" autocomplete="username" required /></label>
+    <label>كلمة المرور (6 أحرف على الأقل)<input name="password" type="password" autocomplete="new-password" required /></label>
+    <button class="btn primary block" type="submit">إنشاء وبدء الاستخدام</button>
+    <p class="form-error" data-error></p>
   </form>
 </div>
 
-<div id="setup" class="screen hidden">
-  <form id="setup-form" class="card">
-    <h1>WhatsApp Hub</h1>
-    <p class="muted">الإعداد الأول: أنشئ حساب المدير</p>
-    <input name="name" placeholder="اسمك" required />
-    <input name="username" placeholder="اسم المستخدم (إنجليزي)" autocomplete="username" required />
-    <input name="password" type="password" placeholder="كلمة المرور (6 أحرف على الأقل)" autocomplete="new-password" required />
-    <button class="btn primary" type="submit">إنشاء وبدء الاستخدام</button>
-    <p id="setup-error" class="error"></p>
-  </form>
-</div>
+<!-- التطبيق -->
+<div id="app" class="shell hidden">
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-brand"><span class="dot"></span><span>WhatsApp Hub</span><button class="icon-btn sidebar-close" data-close-nav aria-label="إغلاق">✕</button></div>
+    <nav id="nav" class="nav"></nav>
+    <div class="sidebar-foot">
+      <div id="me" class="me"></div>
+      <button id="btn-logout" class="icon-btn" title="تسجيل الخروج">⏻</button>
+    </div>
+  </aside>
+  <div class="backdrop" data-close-nav></div>
 
-<div id="app" class="layout hidden">
-  <aside class="sidebar">
-    <header class="sidebar-head">
-      <div class="brand"><span class="dot"></span> WhatsApp Hub <span id="me-name" class="muted small-text"></span></div>
-      <div class="head-actions">
-        <button id="btn-leads" class="btn small" title="الاستفسارات">🔔 <span id="leads-count" class="badge hidden"></span></button>
-        <button id="btn-settings" class="btn small" title="الإعدادات">⚙️</button>
-        <button id="btn-add" class="btn small admin-only">+ إضافة رقم</button>
-        <button id="btn-logout" class="btn small" title="تسجيل الخروج">⏻</button>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="btn-nav" aria-label="القائمة">☰</button>
+      <div class="search-wrap">
+        <input id="global-search" type="search" placeholder="بحث سريع: اسم، جوال، شركة، وسم…" autocomplete="off" />
+        <div id="search-results" class="search-results hidden"></div>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-leads" class="icon-btn" title="الاستفسارات">🔔<span id="leads-badge" class="count hidden"></span></button>
+        <button id="btn-add-contact" class="btn primary small">+ <span>إضافة عميل</span></button>
       </div>
     </header>
-
-    <section class="accounts">
-      <h2>الأرقام والمنصات</h2>
-      <ul id="accounts-list"></ul>
-    </section>
-
-    <section class="chats-section">
-      <div class="chats-head">
-        <h2 id="chats-title">الصندوق الموحّد</h2>
-        <input id="chat-search" type="search" placeholder="بحث في المحادثات" />
-        <div class="chat-filters">
-          <button class="cf active" data-f="all">الكل</button>
-          <button class="cf" data-f="mine">محادثاتي</button>
-          <button class="cf" data-f="unassigned">غير مُسندة</button>
-        </div>
-      </div>
-      <ul id="chats-list"></ul>
-    </section>
-  </aside>
-
-  <main class="main">
-    <div id="empty" class="empty">
-      <div class="empty-icon">💬</div>
-      <p>اختر محادثة من القائمة أو ابدأ رسالة جديدة</p>
-      <button id="btn-new-msg" class="btn">✉️ رسالة جديدة</button>
-    </div>
-
-    <div id="conversation" class="conversation hidden">
-      <header class="conv-head">
-        <div>
-          <div id="conv-name" class="conv-name"></div>
-          <div id="conv-meta" class="muted small-text"></div>
-        </div>
-        <label class="assign">مُسندة إلى <select id="assign-select"><option value="">— لا أحد —</option></select></label>
-      </header>
-      <div id="messages" class="messages"></div>
-      <button id="btn-older" class="btn small older hidden" type="button">⬇ تحميل رسائل أقدم من الهاتف</button>
-      <div id="templates-pop" class="templates-pop hidden"></div>
-      <form id="send-form" class="send-form">
-        <button class="btn icon" type="button" id="btn-templates" title="ردود جاهزة">⚡</button>
-        <button class="btn icon" type="button" id="btn-attach" title="إرفاق ملف">📎</button>
-        <input id="attach-input" type="file" class="hidden" />
-        <textarea id="send-text" rows="1" placeholder="اكتب رسالة... (اكتب / للردود الجاهزة)"></textarea>
-        <button class="btn primary" type="submit">إرسال</button>
-      </form>
-    </div>
-  </main>
+    <main id="view" class="view"></main>
+  </div>
 </div>
 
-<!-- نافذة إضافة رقم -->
-<dialog id="add-dialog" class="dialog">
-  <form id="add-form" method="dialog">
-    <h2>إضافة رقم / منصة</h2>
-    <label>الاسم التعريفي<input name="label" placeholder="مثال: خدمة العملاء، المبيعات" required /></label>
-    <label>نوع الربط
-      <select name="type" id="add-type">
-        <option value="qr">واتساب عادي / بزنس — ربط عبر QR</option>
-        <option value="cloud">WhatsApp Business Cloud API (Meta)</option>
-      </select>
-    </label>
-    <div id="cloud-fields" class="hidden">
-      <label>Phone Number ID<input name="phoneNumberId" /></label>
-      <label>Access Token<input name="accessToken" type="password" /></label>
-      <p class="muted small-text">أضف Webhook في Meta على: <code id="webhook-url"></code></p>
-    </div>
-    <div class="dialog-actions">
-      <button class="btn" type="button" id="add-cancel">إلغاء</button>
-      <button class="btn primary" type="submit">إضافة وربط</button>
-    </div>
-  </form>
-</dialog>
-
-<!-- نافذة QR -->
-<dialog id="qr-dialog" class="dialog">
-  <div class="qr-box">
-    <h2 id="qr-title">امسح رمز QR</h2>
-    <p class="muted small-text">واتساب ← الأجهزة المرتبطة ← ربط جهاز</p>
-    <img id="qr-img" alt="QR" />
-    <p id="qr-status" class="muted"></p>
-    <button class="btn" id="qr-close" type="button">إغلاق</button>
-  </div>
-</dialog>
-
-<!-- نافذة رسالة جديدة -->
-<dialog id="new-dialog" class="dialog">
-  <form id="new-form" method="dialog">
-    <h2>رسالة جديدة</h2>
-    <label>الإرسال من<select name="accountId" id="new-account"></select></label>
-    <label>رقم المستلم (بالصيغة الدولية)<input name="to" placeholder="9665xxxxxxxx" required /></label>
-    <label>الرسالة<textarea name="text" rows="3" required></textarea></label>
-    <div class="dialog-actions">
-      <button class="btn" type="button" id="new-cancel">إلغاء</button>
-      <button class="btn primary" type="submit">إرسال</button>
-    </div>
-  </form>
-</dialog>
-
-<!-- نافذة إرسال مرفق -->
-<dialog id="attach-dialog" class="dialog">
-  <form id="attach-form" method="dialog">
-    <h2>إرسال مرفق</h2>
-    <div id="attach-preview" class="attach-preview"></div>
-    <label>تعليق (اختياري)<input name="caption" /></label>
-    <div class="dialog-actions">
-      <button class="btn" type="button" id="attach-cancel">إلغاء</button>
-      <button class="btn primary" type="submit">إرسال</button>
-    </div>
-  </form>
-</dialog>
-
-<!-- نافذة الإعدادات: الردود الجاهزة والتلقائية -->
-<dialog id="settings-dialog" class="dialog wide">
-  <div class="settings">
-    <div class="settings-head">
-      <h2>الإعدادات</h2>
-      <button class="btn" type="button" id="settings-close">إغلاق</button>
-    </div>
-    <div class="tabs">
-      <button class="tab active" data-tab="templates">⚡ الردود الجاهزة</button>
-      <button class="tab" data-tab="rules">🤖 الردود التلقائية</button>
-      <button class="tab" data-tab="alerts">🔔 تنبيهات الاستفسارات</button>
-      <button class="tab" data-tab="users">👥 المستخدمون</button>
-    </div>
-
-    <section id="tab-users" class="tab-panel hidden">
-      <form id="user-form" class="inline-form">
-        <input type="hidden" name="id" />
-        <div class="row">
-          <input name="name" placeholder="اسم الموظف" required />
-          <input name="username" placeholder="اسم المستخدم (إنجليزي)" autocomplete="off" required />
-        </div>
-        <div class="row">
-          <input name="password" type="password" placeholder="كلمة المرور" autocomplete="new-password" />
-          <label>الدور<select name="role"><option value="agent">موظف</option><option value="admin">مدير</option></select></label>
-        </div>
-        <div id="user-accounts" class="checks"></div>
-        <p class="muted small-text">الموظف يرى ويرد على الأرقام المحددة فقط. المدير يرى كل شيء.</p>
-        <div class="dialog-actions"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="user-reset">جديد</button></div>
-      </form>
-      <ul id="users-list" class="items"></ul>
-    </section>
-
-    <section id="tab-alerts" class="tab-panel hidden">
-      <form id="alerts-form" class="inline-form">
-        <label class="check"><input type="checkbox" name="enabled" /> تفعيل التنبيهات</label>
-        <label>إيميل استقبال التنبيهات<input name="notifyEmail" type="email" placeholder="you@example.com" required /></label>
-        <label>الكلمات التي تُعتبر استفسارًا (افصل بفاصلة)<textarea name="keywords" rows="2"></textarea></label>
-        <div class="row">
-          <label class="check"><input type="checkbox" name="whatsapp" /> مراقبة واتساب (كل الأرقام)</label>
-          <label class="check"><input type="checkbox" name="email" /> مراقبة الإيميل الوارد</label>
-        </div>
-        <label>عدم تكرار التنبيه لنفس الشخص خلال (دقائق)<input name="cooldownMinutes" type="number" min="0" value="60" /></label>
-        <div id="alerts-status" class="muted small-text"></div>
-        <div class="dialog-actions">
-          <button class="btn primary" type="submit">حفظ</button>
-          <button class="btn" type="button" id="alerts-test">إرسال إيميل تجريبي</button>
-        </div>
-      </form>
-    </section>
-
-    <section id="tab-templates" class="tab-panel">
-      <form id="template-form" class="inline-form">
-        <input type="hidden" name="id" />
-        <input name="title" placeholder="العنوان (مثال: الترحيب)" required />
-        <textarea name="text" rows="2" placeholder="نص الرد… يمكنك استخدام {name} لاسم العميل" required></textarea>
-        <div class="dialog-actions"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="template-reset">جديد</button></div>
-      </form>
-      <ul id="templates-list" class="items"></ul>
-    </section>
-
-    <section id="tab-rules" class="tab-panel hidden">
-      <form id="rule-form" class="inline-form">
-        <input type="hidden" name="id" />
-        <input name="name" placeholder="اسم القاعدة" />
-        <div class="row">
-          <label>النوع
-            <select name="trigger" id="rule-trigger">
-              <option value="keyword">كلمة مفتاحية</option>
-              <option value="welcome">ترحيب (أول رسالة من العميل)</option>
-              <option value="away">خارج أوقات العمل</option>
-            </select>
-          </label>
-          <label>الرقم<select name="accountId" id="rule-account"><option value="">كل الأرقام</option></select></label>
-        </div>
-        <div class="row rule-keyword">
-          <label>الكلمات (افصل بفاصلة)<input name="keywords" placeholder="السعر, الأسعار, كم" /></label>
-          <label>المطابقة<select name="match"><option value="contains">تحتوي</option><option value="exact">مطابقة تامة</option></select></label>
-        </div>
-        <div class="row rule-away hidden">
-          <label>من الساعة<input name="fromHour" type="number" min="0" max="23" value="18" /></label>
-          <label>إلى الساعة<input name="toHour" type="number" min="0" max="23" value="8" /></label>
-        </div>
-        <div class="row rule-cooldown hidden">
-          <label>لا يتكرر خلال (ساعات)<input name="cooldownHours" type="number" min="1" value="24" /></label>
-        </div>
-        <textarea name="reply" rows="2" placeholder="نص الرد التلقائي… {name} لاسم العميل" required></textarea>
-        <div class="dialog-actions"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="rule-reset">جديد</button></div>
-      </form>
-      <ul id="rules-list" class="items"></ul>
-    </section>
-  </div>
-</dialog>
-
-<!-- نافذة الاستفسارات -->
-<dialog id="leads-dialog" class="dialog wide">
-  <div class="settings">
-    <div class="settings-head">
-      <h2>🔔 الاستفسارات (الدورات والشهادات)</h2>
-      <button class="btn" type="button" id="leads-close">إغلاق</button>
-    </div>
-    <div class="tabs">
-      <button class="ltab active" data-f="new">جديدة</button>
-      <button class="ltab" data-f="contacted">تم التواصل</button>
-      <button class="ltab" data-f="done">منتهية</button>
-      <button class="ltab" data-f="all">الكل</button>
-    </div>
-    <ul id="leads-list" class="items"></ul>
-  </div>
-</dialog>
-
-<div id="toast" class="toast hidden"></div>
+<div id="modal-root"></div>
+<div id="drawer-root"></div>
+<div id="toast-root" class="toasts"></div>
+<div id="viewer" class="viewer hidden"><button class="viewer-close" aria-label="إغلاق">✕</button><img alt="" /></div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="app.js"></script>
+<script type="module" src="/js/app.js"></script>
 </body>
 </html>

@@ -82,7 +82,7 @@ export class BaileysProvider {
       for (const m of messages) {
         const parsed = this.parseMessage(m);
         if (!parsed) continue;
-        if (parsed.mediaType) await this.attachMedia(m, parsed).catch(() => {});
+        if (parsed.mediaType) await this.attachMedia(m, parsed).catch((e) => { parsed.media = { state: /not found|410|404/i.test(e.message || "") ? "expired" : "failed", fileName: "", mimetype: "" }; });
         this.events.onMessage(parsed);
       }
     });
@@ -103,8 +103,8 @@ export class BaileysProvider {
     this.sock.ev.on("messages.update", (updates) => {
       for (const u of updates) {
         if (u.update?.status === undefined) continue;
-        const status = ["error", "pending", "sent", "delivered", "read", "played"][u.update.status] || "sent";
-        this.events.onStatusUpdate({ chatId: u.key.remoteJid, messageId: u.key.id, status });
+        const status = ["failed", "pending", "sent", "delivered", "read", "played"][u.update.status] || "sent";
+        this.events.onStatusUpdate({ chatId: u.key.remoteJid, messageId: u.key.id, status: status === "played" ? "read" : status, reason: status === "failed" ? "رفض الخادم الرسالة" : undefined });
       }
     });
 
@@ -198,7 +198,10 @@ export class BaileysProvider {
     const buffer = await downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: this.sock.updateMediaMessage });
     const content = normalizeMessageContent(m.message) || {};
     const inner = content.imageMessage || content.videoMessage || content.ptvMessage || content.audioMessage || content.documentMessage || content.stickerMessage || {};
-    parsed.media = store.saveMedia(this.account.id, parsed.id, buffer, inner.mimetype || "", inner.fileName);
+    parsed.media = store.saveMedia(this.account.id, parsed.id, buffer, inner.mimetype || "", inner.fileName, {
+      caption: inner.caption || "", providerMediaId: inner.mediaKey ? undefined : undefined,
+      thumbnail: inner.jpegThumbnail ? `data:image/jpeg;base64,${Buffer.from(inner.jpegThumbnail).toString("base64")}` : undefined,
+    });
   }
 
   jidOf(chatId) {
@@ -223,6 +226,11 @@ export class BaileysProvider {
 
   async sendText(chatId, text) {
     if (!this.sock) throw new Error("الحساب غير متصل");
+    if (!chatId.includes("@")) {
+      const digits = chatId.replace(/\D/g, "");
+      const [res] = await this.sock.onWhatsApp(digits).catch(() => [null]);
+      if (res && res.exists === false) throw new Error("هذا الرقم غير مسجّل في واتساب");
+    }
     const jid = this.jidOf(chatId);
     const sent = await this.sock.sendMessage(jid, { text });
     return {

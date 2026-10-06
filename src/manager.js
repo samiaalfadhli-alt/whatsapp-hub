@@ -4,6 +4,8 @@ import * as store from "./store.js";
 import { BaileysProvider } from "./providers/baileys.js";
 import { CloudApiProvider } from "./providers/cloud.js";
 import { processIncoming } from "./alerts.js";
+import * as users from "./users.js";
+import { maskPhone, jidToPhone } from "./phone.js";
 
 export class AccountManager {
   constructor(io) {
@@ -26,6 +28,20 @@ export class AccountManager {
 
   listAccounts() {
     return store.listAccounts().map((a) => this.publicAccount(a));
+  }
+
+  // بث بدون كشف الأرقام لمن لا يملك الصلاحية: غرفتان لكل رقم (full / masked)
+  emitMessage(accountId, saved) {
+    const { chatId, key, ...rest } = saved;
+    const base = { ...rest, chatRef: store.getChat(accountId, chatId)?.ref };
+    this.io.to(`account:${accountId}:full`).emit("message:new", { accountId, message: base });
+    this.io.to(`account:${accountId}:masked`).emit("message:new", { accountId, message: { ...base, sender: saved.isGroup ? maskPhone(jidToPhone(saved.sender)) : "" } });
+  }
+  emitChat(accountId, chatId) {
+    const c = store.getChat(accountId, chatId); if (!c) return;
+    const { id, ...rest } = c; const phone = c.isGroup ? "" : jidToPhone(id);
+    this.io.to(`account:${accountId}:full`).emit("chat:update", { accountId, chat: { ...rest, phone } });
+    this.io.to(`account:${accountId}:masked`).emit("chat:update", { accountId, chat: { ...rest, phone: maskPhone(phone) } });
   }
 
   setStatus(accountId, status, extra = {}) {
@@ -51,8 +67,8 @@ export class AccountManager {
       },
       onMessage: (message) => {
         const saved = store.addMessage(accountId, message);
-        this.io.to(`account:${accountId}`).emit("message:new", { accountId, message: saved });
-        this.io.to(`account:${accountId}`).emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+        this.emitMessage(accountId, saved);
+        this.emitChat(accountId, message.chatId);
         if (!message.fromMe) {
           this.runAutoReplies(accountId, saved).catch(() => {});
           if (!message.isGroup) {
@@ -67,9 +83,15 @@ export class AccountManager {
       onHistory: ({ added, progress, isLatest }) => {
         this.io.to(`account:${accountId}`).emit("history:synced", { accountId, added, progress, isLatest });
       },
-      onStatusUpdate: ({ chatId, messageId, status }) => {
-        store.updateMessageStatus(accountId, chatId, messageId, status);
-        this.io.to(`account:${accountId}`).emit("message:status", { accountId, chatId, messageId, status });
+      onStatusUpdate: ({ chatId, messageId, status, reason }) => {
+        const st = status === "error" ? "failed" : status;
+        if (!store.updateMessageStatus(accountId, chatId, messageId, st, reason || null)) return;
+        this.io.to(`account:${accountId}`).emit("message:status", { accountId, messageId, status: st, reason: reason || null });
+        this.campaigns?.onMessageStatus(accountId, messageId, st, reason);
+      },
+      onMediaState: ({ messageId, state }) => {
+        store.updateMediaState(accountId, messageId, state);
+        this.io.to(`account:${accountId}`).emit("message:media", { accountId, messageId, state });
       },
     };
   }
@@ -77,7 +99,10 @@ export class AccountManager {
   async addAccount({ label, type = "qr", phoneNumberId, accessToken }) {
     const id = crypto.randomUUID();
     // المديرون ينضمون لغرفة الرقم الجديد فورًا
-    for (const [, socket] of this.io.sockets.sockets) if (socket.data.user?.role === "admin") socket.join(`account:${id}`);
+    for (const [, socket] of this.io.sockets.sockets) {
+      const u = socket.data.user;
+      if (users.can(u, "view_all_conversations")) { socket.join(`account:${id}`); socket.join(`account:${id}:${users.can(u, "view_phone_numbers") ? "full" : "masked"}`); }
+    }
     const account = store.saveAccount({
       id,
       label: label || "رقم جديد",
@@ -127,23 +152,28 @@ export class AccountManager {
     this.io.to(`account:${accountId}`).emit("account:removed", { accountId });
   }
 
-  async sendText(accountId, chatId, text) {
+  requireProvider(accountId) {
     const provider = this.providers.get(accountId);
-    if (!provider) throw new Error("الحساب غير متصل");
+    const rt = this.runtime.get(accountId);
+    if (!provider || rt?.status !== "connected") throw new Error("رقم واتساب غير متصل حاليًا. تحقق من حالة الاتصال في إعدادات WhatsApp");
+    return provider;
+  }
+
+  async sendText(accountId, chatId, text, opts = {}) {
+    const provider = this.requireProvider(accountId);
     const message = await provider.sendText(chatId, text);
-    const saved = store.addMessage(accountId, message);
-    this.io.to(`account:${accountId}`).emit("message:new", { accountId, message: saved });
-    this.io.to(`account:${accountId}`).emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+    const saved = store.addMessage(accountId, { ...message, campaignId: opts.campaignId || null, sentBy: opts.userId || null });
+    this.emitMessage(accountId, saved);
+    this.emitChat(accountId, message.chatId);
     return saved;
   }
 
-  async sendMedia(accountId, chatId, file) {
-    const provider = this.providers.get(accountId);
-    if (!provider) throw new Error("الحساب غير متصل");
+  async sendMedia(accountId, chatId, file, opts = {}) {
+    const provider = this.requireProvider(accountId);
     const message = await provider.sendMedia(chatId, file);
-    const saved = store.addMessage(accountId, message);
-    this.io.to(`account:${accountId}`).emit("message:new", { accountId, message: saved });
-    this.io.to(`account:${accountId}`).emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+    const saved = store.addMessage(accountId, { ...message, campaignId: opts.campaignId || null, sentBy: opts.userId || null });
+    this.emitMessage(accountId, saved);
+    this.emitChat(accountId, message.chatId);
     return saved;
   }
 
@@ -153,7 +183,7 @@ export class AccountManager {
     const rules = store.listRules().filter((r) => r.enabled !== false && (!r.accountId || r.accountId === accountId));
     if (!rules.length) return;
     const text = (message.text || "").toLowerCase();
-    const history = store.listMessages(accountId, message.chatId);
+    const history = store.listMessages(accountId, message.chatId, { limit: 50 });
     const lastFromMe = [...history].reverse().find((m) => m.fromMe);
     const hoursSinceReply = lastFromMe ? (Date.now() - lastFromMe.timestamp) / 36e5 : Infinity;
     for (const rule of rules) {
