@@ -207,3 +207,5 @@ label.check input { width: auto; margin: 0; }
 .sidebar-head { flex-wrap: wrap; gap: 8px; }
 .brand { font-size: 14px; }
 .head-actions .btn.small { padding: 5px 8px; white-space: nowrap; }
+.older { align-self: center; margin: 6px auto; font-size: 12px; }
+.conversation .messages { order: 0; }

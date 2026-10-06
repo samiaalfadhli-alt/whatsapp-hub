@@ -83,7 +83,13 @@ export function listMessages(accountId, chatId) {
 export function addMessage(accountId, message) {
   const file = chatFile(accountId, message.chatId);
   const messages = readJson(file, []);
-  if (messages.some((m) => m.id === message.id)) return message;
+  const dup = messages.find((m) => m.id === message.id);
+  if (dup) {
+    if (!message.edited) return dup;
+    dup.text = message.text; // تعديل رسالة سابقة
+    writeJson(file, messages);
+    return dup;
+  }
   messages.push(message);
   if (messages.length > MAX_MESSAGES_PER_CHAT) messages.splice(0, messages.length - MAX_MESSAGES_PER_CHAT);
   writeJson(file, messages);
@@ -97,6 +103,44 @@ export function addMessage(accountId, message) {
     unread: message.fromMe ? 0 : (existing?.unread || 0) + 1,
   });
   return message;
+}
+
+// استيراد دفعة رسائل من سجل الهاتف: بدون زيادة "غير مقروء"، مع ترتيب زمني وحفظ آخر 500
+export function importHistory(accountId, messages) {
+  const byChat = new Map();
+  for (const m of messages) {
+    if (!byChat.has(m.chatId)) byChat.set(m.chatId, []);
+    byChat.get(m.chatId).push(m);
+  }
+  const chats = readJson(chatsFile(accountId), []);
+  let added = 0;
+  for (const [chatId, list] of byChat) {
+    const file = chatFile(accountId, chatId);
+    const existing = readJson(file, []);
+    const ids = new Set(existing.map((m) => m.id));
+    const fresh = list.filter((m) => !ids.has(m.id));
+    if (!fresh.length) continue;
+    added += fresh.length;
+    const merged = [...existing, ...fresh].sort((a, b) => a.timestamp - b.timestamp);
+    if (merged.length > MAX_MESSAGES_PER_CHAT) merged.splice(0, merged.length - MAX_MESSAGES_PER_CHAT);
+    writeJson(file, merged);
+    const last = merged[merged.length - 1];
+    const idx = chats.findIndex((c) => c.id === chatId);
+    const base = idx === -1 ? { id: chatId, unread: 0 } : chats[idx];
+    const next = {
+      ...base,
+      name: base.name || fresh.find((m) => m.chatName)?.chatName || chatId.split("@")[0],
+      lastMessage: (last.timestamp >= (base.lastTimestamp || 0) ? last.text : base.lastMessage || "")?.slice(0, 120) || "",
+      lastTimestamp: Math.max(base.lastTimestamp || 0, last.timestamp),
+    };
+    if (idx === -1) chats.push(next); else chats[idx] = next;
+  }
+  writeJson(chatsFile(accountId), chats);
+  return added;
+}
+
+export function oldestMessage(accountId, chatId) {
+  return readJson(chatFile(accountId, chatId), [])[0] || null;
 }
 
 export function markChatRead(accountId, chatId) {

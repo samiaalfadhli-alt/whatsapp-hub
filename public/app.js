@@ -229,8 +229,23 @@ async function openChat(accountId, chatId) {
   if (chat) chat.unread = 0;
   renderChats();
   $("#messages").innerHTML = messages.map(renderMessage).join("");
+  $("#btn-older").classList.toggle("hidden", a?.type === "cloud");
   scrollBottom();
   $("#send-text").focus();
+}
+$("#btn-older").addEventListener("click", async () => {
+  if (!state.current) return;
+  try {
+    await api(`/accounts/${state.current.accountId}/chats/${encodeURIComponent(state.current.chatId)}/history`, { method: "POST" });
+    toast("تم طلب الرسائل الأقدم من الهاتف… ستظهر خلال ثوانٍ");
+  } catch (err) { toast(err.message, true); }
+});
+async function reloadCurrentMessages() {
+  if (!state.current) return;
+  const el = $("#messages"); const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const messages = await api(`/accounts/${state.current.accountId}/chats/${encodeURIComponent(state.current.chatId)}/messages`);
+  el.innerHTML = messages.map(renderMessage).join("");
+  if (atBottom) scrollBottom();
 }
 async function loadAssignees(accountId, selected) {
   state.assignees = await api(`/assignees?accountId=${accountId}`);
@@ -605,6 +620,11 @@ socket.on("lead:new", (lead) => {
   state.leads.unshift(lead); updateLeadsBadge();
   if ($("#leads-dialog").open) renderLeads();
   toast(`🔔 استفسار جديد عن ${lead.matched[0]} من ${lead.fromName || lead.from} (${lead.channel === "whatsapp" ? "واتساب" : "إيميل"})`);
+});
+socket.on("history:synced", async ({ accountId, added, isLatest }) => {
+  if (added) toast(`📥 تمت مزامنة ${added} رسالة من سجل الهاتف${isLatest ? " ✅" : "…"}`);
+  await loadChats();
+  if (state.current?.accountId === accountId) reloadCurrentMessages().catch(() => {});
 });
 socket.on("chat:assigned", ({ chat, by }) => toast(`👤 ${by} أسند إليك محادثة: ${chat.name || chat.id.split("@")[0]}`));
 socket.on("email:status", () => { if ($("#settings-dialog").open) loadAlertSettings().catch(() => {}); });

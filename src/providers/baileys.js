@@ -5,6 +5,8 @@ import baileys, {
   useMultiFileAuthState,
   jidNormalizedUser,
   downloadMediaMessage,
+  normalizeMessageContent,
+  getContentType,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
@@ -32,7 +34,7 @@ export class BaileysProvider {
       logger,
       printQRInTerminal: false,
       browser: ["WhatsApp Hub", "Chrome", "1.0"],
-      syncFullHistory: false,
+      syncFullHistory: true, // سحب الدردشات القديمة من الهاتف عند الربط
       markOnlineOnConnect: false,
     });
 
@@ -85,6 +87,19 @@ export class BaileysProvider {
       }
     });
 
+    // سجل الدردشات القادم من الهاتف (عند الربط أو عند طلب رسائل أقدم)
+    this.sock.ev.on("messaging-history.set", ({ chats, contacts, messages, progress, isLatest }) => {
+      for (const c of contacts || []) {
+        if (c.name || c.notify) store.upsertChat(this.account.id, { id: c.id, name: c.name || c.notify });
+      }
+      for (const c of chats || []) {
+        store.upsertChat(this.account.id, { id: c.id, name: c.name || undefined, unread: 0 });
+      }
+      const parsed = (messages || []).map((m) => this.parseMessage(m)).filter(Boolean);
+      const added = store.importHistory(this.account.id, parsed);
+      this.events.onHistory?.({ added, progress: progress ?? null, isLatest: !!isLatest });
+    });
+
     this.sock.ev.on("messages.update", (updates) => {
       for (const u of updates) {
         if (u.update?.status === undefined) continue;
@@ -109,40 +124,80 @@ export class BaileysProvider {
   parseMessage(m) {
     const jid = m.key?.remoteJid;
     if (!jid || jid === "status@broadcast") return null;
-    const content = m.message || {};
-    const text =
+    // فك التغليف: رسائل مؤقتة، عرض لمرة واحدة، مستند مع تعليق، رسالة معدّلة
+    let content = normalizeMessageContent(m.message) || {};
+    // رسالة معدّلة: نأخذ المحتوى الجديد ونحدّث الرسالة الأصلية بنفس المعرّف
+    let editedId = null;
+    if (content.protocolMessage?.editedMessage) {
+      editedId = content.protocolMessage.key?.id || null;
+      content = normalizeMessageContent(content.protocolMessage.editedMessage) || {};
+    }
+    const type = getContentType(content);
+    // أحداث ليست رسائل للمستخدم
+    if (!type || ["protocolMessage", "senderKeyDistributionMessage", "messageContextInfo", "reactionMessage", "keepInMessage", "pinInChatMessage", "encReactionMessage", "pollUpdateMessage"].includes(type)) return null;
+
+    const img = content.imageMessage, vid = content.videoMessage, aud = content.audioMessage, doc = content.documentMessage, stk = content.stickerMessage, ptv = content.ptvMessage;
+    const loc = content.locationMessage || content.liveLocationMessage;
+    const poll = content.pollCreationMessage || content.pollCreationMessageV2 || content.pollCreationMessageV3;
+    let text =
       content.conversation ||
       content.extendedTextMessage?.text ||
-      content.imageMessage?.caption ||
-      content.videoMessage?.caption ||
-      content.documentMessage?.fileName ||
-      (content.imageMessage && "📷 صورة") ||
-      (content.videoMessage && "🎬 فيديو") ||
-      (content.audioMessage && "🎤 رسالة صوتية") ||
-      (content.stickerMessage && "🩵 ملصق") ||
-      (content.locationMessage && "📍 موقع") ||
-      (content.contactMessage && "👤 جهة اتصال") ||
+      img?.caption || vid?.caption || doc?.caption ||
+      (doc && (doc.fileName || "📄 ملف")) ||
+      (img && "📷 صورة") || (vid && "🎬 فيديو") || (ptv && "🎥 رسالة فيديو") ||
+      (aud && (aud.ptt ? "🎤 رسالة صوتية" : "🎵 مقطع صوتي")) ||
+      (stk && "🩵 ملصق") ||
+      (loc && `📍 موقع${loc.name ? ": " + loc.name : ""}${loc.degreesLatitude ? ` (https://maps.google.com/?q=${loc.degreesLatitude},${loc.degreesLongitude})` : ""}`) ||
+      (content.contactMessage && `👤 جهة اتصال: ${content.contactMessage.displayName || ""}`) ||
+      (content.contactsArrayMessage && `👤 جهات اتصال (${content.contactsArrayMessage.contacts?.length || 0})`) ||
+      (poll && `📊 استطلاع: ${poll.name || ""}${poll.options?.length ? " — " + poll.options.map((o) => o.optionName).join(" | ") : ""}`) ||
+      content.buttonsResponseMessage?.selectedDisplayText ||
+      content.listResponseMessage?.title ||
+      content.templateButtonReplyMessage?.selectedDisplayText ||
+      content.interactiveResponseMessage?.body?.text ||
+      content.buttonsMessage?.contentText ||
+      content.listMessage?.description ||
+      content.templateMessage?.hydratedTemplate?.hydratedContentText ||
+      content.interactiveMessage?.body?.text ||
+      (content.productMessage && `🛍️ منتج: ${content.productMessage.product?.title || ""}`) ||
+      (content.orderMessage && `🧾 طلب: ${content.orderMessage.orderTitle || ""}`) ||
+      (content.groupInviteMessage && `🔗 دعوة مجموعة: ${content.groupInviteMessage.groupName || ""}`) ||
+      (content.eventMessage && `📅 حدث: ${content.eventMessage.name || ""}`) ||
+      (content.callLogMessage && "📞 مكالمة") ||
+      (content.requestPaymentMessage && "💳 طلب دفع") ||
       "";
-    if (!text && !Object.keys(content).length) return null;
-    const mediaType = content.imageMessage ? "image" : content.videoMessage ? "video" : content.audioMessage ? "audio" : content.documentMessage ? "document" : content.stickerMessage ? "sticker" : null;
+    if (!text) text = `[${type.replace(/Message$/, "")}]`;
+    if (editedId) text = `${text} (معدّلة)`;
+    const mediaType = img ? "image" : vid || ptv ? "video" : aud ? "audio" : doc ? "document" : stk ? "sticker" : null;
     return {
       mediaType,
-      id: m.key.id,
+      id: editedId || m.key.id,
+      edited: !!editedId,
       chatId: jid,
       chatName: m.pushName || undefined,
       fromMe: !!m.key.fromMe,
-      text: text || "[رسالة غير مدعومة]",
+      text,
       timestamp: Number(m.messageTimestamp) * 1000 || Date.now(),
       status: m.key.fromMe ? "sent" : "received",
       isGroup: jid.endsWith("@g.us"),
       sender: m.key.participant || jid,
+      key: { remoteJid: jid, id: m.key.id, fromMe: !!m.key.fromMe, ...(m.key.participant && { participant: m.key.participant }) },
     };
+  }
+
+  // طلب رسائل أقدم من الهاتف لمحادثة معينة (تصل عبر messaging-history.set)
+  async fetchOlder(chatId, count = 50) {
+    if (!this.sock) throw new Error("الحساب غير متصل");
+    const oldest = store.oldestMessage(this.account.id, chatId);
+    if (!oldest?.key) throw new Error("لا توجد رسالة مرجعية لهذه المحادثة بعد");
+    await this.sock.fetchMessageHistory(count, oldest.key, Math.floor(oldest.timestamp / 1000));
+    return { requested: count };
   }
 
   async attachMedia(m, parsed) {
     const buffer = await downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: this.sock.updateMediaMessage });
-    const content = m.message || {};
-    const inner = content.imageMessage || content.videoMessage || content.audioMessage || content.documentMessage || content.stickerMessage || {};
+    const content = normalizeMessageContent(m.message) || {};
+    const inner = content.imageMessage || content.videoMessage || content.ptvMessage || content.audioMessage || content.documentMessage || content.stickerMessage || {};
     parsed.media = store.saveMedia(this.account.id, parsed.id, buffer, inner.mimetype || "", inner.fileName);
   }
 

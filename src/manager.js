@@ -64,6 +64,9 @@ export class AccountManager {
           }
         }
       },
+      onHistory: ({ added, progress, isLatest }) => {
+        this.io.to(`account:${accountId}`).emit("history:synced", { accountId, added, progress, isLatest });
+      },
       onStatusUpdate: ({ chatId, messageId, status }) => {
         store.updateMessageStatus(accountId, chatId, messageId, status);
         this.io.to(`account:${accountId}`).emit("message:status", { accountId, chatId, messageId, status });
@@ -172,6 +175,13 @@ export class AccountManager {
       if (reply.trim()) await this.sendText(accountId, message.chatId, reply);
       if (rule.stop !== false) break;
     }
+  }
+
+  async fetchOlder(accountId, chatId) {
+    const provider = this.providers.get(accountId);
+    if (!provider) throw new Error("الحساب غير متصل");
+    if (!provider.fetchOlder) throw new Error("هذا النوع من الحسابات لا يدعم سحب السجل");
+    return provider.fetchOlder(chatId);
   }
 
   cloudProviderByPhoneNumberId(phoneNumberId) {

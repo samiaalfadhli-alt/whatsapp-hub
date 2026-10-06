@@ -156,6 +156,8 @@ app.patch("/api/accounts/:id/chats/:chatId", accountAccess, wrap(async (req, res
   if (assignee && assignee.id !== req.user.id) io.to(`user:${assignee.id}`).emit("chat:assigned", { accountId: req.params.id, chat, by: req.user.name });
   res.json(chat);
 }));
+// سحب رسائل أقدم من الهاتف
+app.post("/api/accounts/:id/chats/:chatId/history", accountAccess, wrap(async (req, res) => res.json(await manager.fetchOlder(req.params.id, req.params.chatId))));
 app.get("/api/accounts/:id/chats/:chatId/messages", accountAccess, (req, res) => {
   store.markChatRead(req.params.id, req.params.chatId);
   res.json(store.listMessages(req.params.id, req.params.chatId));
