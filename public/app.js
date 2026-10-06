@@ -6,7 +6,11 @@ const state = {
   current: null, // { accountId, chatId }
   search: "",
   qrFor: null,
+  me: null, // المستخدم الحالي
+  chatFilter: "all", // all | mine | unassigned
+  assignees: [],
 };
+const isAdmin = () => state.me?.role === "admin";
 
 const STATUS_AR = {
   connected: "متصل",
@@ -56,10 +60,25 @@ function showLogin() {
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("#login-error").textContent = "";
-  const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: $("#login-password").value }) });
-  if (!res.ok) return ($("#login-error").textContent = "كلمة المرور غير صحيحة");
+  const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: $("#login-username").value, password: $("#login-password").value }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return ($("#login-error").textContent = data.error || "بيانات الدخول غير صحيحة");
   location.reload();
 });
+$("#setup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#setup-error").textContent = "";
+  const body = Object.fromEntries(new FormData(e.target).entries());
+  const res = await fetch("/api/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return ($("#setup-error").textContent = data.error || "تعذر الإعداد");
+  location.reload();
+});
+$("#btn-logout").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }); location.reload(); });
+function applyRole() {
+  $("#me-name").textContent = state.me ? `· ${state.me.name}${isAdmin() ? " (مدير)" : ""}` : "";
+  document.querySelectorAll(".admin-only").forEach((el) => el.classList.toggle("hidden-role", !isAdmin()));
+}
 
 // ---------- الحسابات ----------
 function renderAccounts() {
@@ -74,12 +93,12 @@ function renderAccounts() {
           <div class="label">${esc(a.label)} <span class="muted small-text">${a.type === "cloud" ? "Cloud API" : "QR"}</span></div>
           <div class="sub">${a.phone ? "+" + esc(a.phone) : STATUS_AR[a.status] || a.status}${a.phone ? " · " + (STATUS_AR[a.status] || a.status) : ""}</div>
         </div>
-        <div class="actions">
+        ${isAdmin() ? `<div class="actions">
           ${a.status === "qr" ? `<button class="btn icon" data-act="qr" title="عرض QR">📱</button>` : ""}
           ${a.status === "connected" ? `<button class="btn icon" data-act="disconnect" title="فصل">⏸</button>` : `<button class="btn icon" data-act="connect" title="اتصال">▶️</button>`}
           <button class="btn icon" data-act="rename" title="إعادة تسمية">✏️</button>
           <button class="btn icon danger" data-act="remove" title="حذف">🗑</button>
-        </div>
+        </div>` : ""}
       </li>`),
   ];
   list.innerHTML = items.join("");
@@ -170,7 +189,9 @@ async function loadChats() {
 
 function renderChats() {
   const q = state.search.trim().toLowerCase();
-  const chats = state.chats.filter((c) => !q || (c.name || "").toLowerCase().includes(q) || c.id.includes(q) || (c.lastMessage || "").toLowerCase().includes(q));
+  const chats = state.chats
+    .filter((c) => state.chatFilter === "all" || (state.chatFilter === "mine" ? c.assignedTo === state.me?.id : !c.assignedTo))
+    .filter((c) => !q || (c.name || "").toLowerCase().includes(q) || c.id.includes(q) || (c.lastMessage || "").toLowerCase().includes(q));
   $("#chats-list").innerHTML = chats.length
     ? chats.map((c) => `
       <li class="chat ${state.current?.chatId === c.id && state.current?.accountId === c.accountId ? "active" : ""}" data-account="${c.accountId}" data-chat="${esc(c.id)}">
@@ -178,13 +199,17 @@ function renderChats() {
         <div class="body">
           <div class="top"><span class="name">${esc(c.name || c.id.split("@")[0])}</span><span class="time">${fmtTime(c.lastTimestamp)}</span></div>
           <div class="preview">${esc(c.lastMessage || "")}</div>
-          ${state.selectedAccount === null ? `<div class="tag">عبر: ${esc(c.accountLabel || "")}</div>` : ""}
+          <div class="tag">${state.selectedAccount === null ? `عبر: ${esc(c.accountLabel || "")}` : ""}${c.assignedName ? ` <span class="assignee">👤 ${esc(c.assignedName)}</span>` : ""}</div>
         </div>
         ${c.unread ? `<span class="badge">${c.unread}</span>` : ""}
       </li>`).join("")
     : `<li class="muted" style="padding:16px;text-align:center">لا توجد محادثات بعد</li>`;
 }
 $("#chat-search").addEventListener("input", (e) => { state.search = e.target.value; renderChats(); });
+document.querySelectorAll(".cf").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".cf").forEach((x) => x.classList.toggle("active", x === b));
+  state.chatFilter = b.dataset.f; renderChats();
+}));
 $("#chats-list").addEventListener("click", (e) => {
   const li = e.target.closest(".chat");
   if (li) openChat(li.dataset.account, li.dataset.chat);
@@ -199,6 +224,7 @@ async function openChat(accountId, chatId) {
   $("#conversation").classList.remove("hidden");
   $("#conv-name").textContent = chat?.name || chatId.split("@")[0];
   $("#conv-meta").textContent = `${chatId.split("@")[0]} · عبر ${a?.label || ""}${a?.phone ? " (+" + a.phone + ")" : ""}`;
+  loadAssignees(accountId, chat?.assignedTo || "").catch(() => {});
   const messages = await api(`/accounts/${accountId}/chats/${encodeURIComponent(chatId)}/messages`);
   if (chat) chat.unread = 0;
   renderChats();
@@ -206,6 +232,17 @@ async function openChat(accountId, chatId) {
   scrollBottom();
   $("#send-text").focus();
 }
+async function loadAssignees(accountId, selected) {
+  state.assignees = await api(`/assignees?accountId=${accountId}`);
+  $("#assign-select").innerHTML = `<option value="">— لا أحد —</option>` + state.assignees.map((u) => `<option value="${u.id}" ${u.id === selected ? "selected" : ""}>${esc(u.name)}${u.id === state.me?.id ? " (أنا)" : ""}</option>`).join("");
+}
+$("#assign-select").addEventListener("change", async (e) => {
+  if (!state.current) return;
+  try {
+    await api(`/accounts/${state.current.accountId}/chats/${encodeURIComponent(state.current.chatId)}`, { method: "PATCH", body: { assignedTo: e.target.value } });
+    toast(e.target.value ? "تم إسناد المحادثة" : "تم إلغاء الإسناد");
+  } catch (err) { toast(err.message, true); }
+});
 function renderMedia(m) {
   if (!m.media?.url) return "";
   const u = esc(m.media.url);
@@ -323,9 +360,60 @@ $("#send-text").addEventListener("keydown", (e) => {
 state.rules = [];
 const TRIGGER_AR = { keyword: "كلمة مفتاحية", welcome: "ترحيب", away: "خارج الدوام" };
 $("#btn-settings").addEventListener("click", async () => {
-  await Promise.all([loadTemplates(), loadRules(), loadAlertSettings()]);
-  renderTemplatesList(); renderRulesList(); fillRuleAccounts();
+  if (isAdmin()) {
+    await Promise.all([loadTemplates(), loadRules(), loadAlertSettings(), loadUsers()]);
+    renderTemplatesList(); renderRulesList(); fillRuleAccounts(); renderUsersList(); fillUserAccounts();
+  } else {
+    await loadTemplates(); renderTemplatesList();
+    $("#template-form").classList.add("hidden");
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("hidden", t.dataset.tab !== "templates"));
+  }
   $("#settings-dialog").showModal();
+});
+
+// ---------- المستخدمون (المدير) ----------
+state.users = [];
+async function loadUsers() { state.users = await api("/users"); }
+function fillUserAccounts(selected = []) {
+  $("#user-accounts").innerHTML = state.accounts.length
+    ? state.accounts.map((a) => `<label><input type="checkbox" name="accountIds" value="${a.id}" ${selected.includes(a.id) ? "checked" : ""} /> ${esc(a.label)}${a.phone ? " (+" + esc(a.phone) + ")" : ""}</label>`).join("")
+    : `<span class="muted small-text">أضف أرقامًا أولًا لتخصيصها للموظفين</span>`;
+}
+function renderUsersList() {
+  $("#users-list").innerHTML = state.users.map((u) => `
+    <li data-id="${u.id}" class="${u.active === false ? "off" : ""}">
+      <div class="body"><b>${esc(u.name)} <span class="role ${u.role}">${u.role === "admin" ? "مدير" : "موظف"}</span>${u.id === state.me.id ? `<span class="role">أنا</span>` : ""}</b>
+      <p>@${esc(u.username)} · ${u.role === "admin" ? "كل الأرقام" : (u.accountIds || []).map((id) => accountOf(id)?.label).filter(Boolean).join("، ") || "بدون أرقام"}</p></div>
+      <button class="btn icon" data-act="edit" title="تعديل">✏️</button>
+      ${u.id !== state.me.id ? `<button class="btn icon" data-act="toggle" title="${u.active === false ? "تفعيل" : "تعطيل"}">${u.active === false ? "▶️" : "⏸"}</button><button class="btn icon danger" data-act="del" title="حذف">🗑</button>` : ""}
+    </li>`).join("");
+}
+$("#user-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const accountIds = [...f.querySelectorAll("[name=accountIds]:checked")].map((x) => x.value);
+  const body = { name: f.name.value, username: f.username.value, password: f.password.value, role: f.role.value, accountIds };
+  try {
+    if (f.id.value) await api(`/users/${f.id.value}`, { method: "PATCH", body: { name: body.name, role: body.role, accountIds, ...(body.password && { password: body.password }) } });
+    else await api("/users", { method: "POST", body });
+    f.reset(); f.username.disabled = false; fillUserAccounts();
+    await loadUsers(); renderUsersList(); toast("تم الحفظ");
+  } catch (err) { toast(err.message, true); }
+});
+$("#user-reset").addEventListener("click", () => { const f = $("#user-form"); f.reset(); f.username.disabled = false; fillUserAccounts(); });
+$("#users-list").addEventListener("click", async (e) => {
+  const li = e.target.closest("li[data-id]"); const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!li || !act) return;
+  const u = state.users.find((x) => x.id === li.dataset.id);
+  try {
+    if (act === "edit") {
+      const f = $("#user-form");
+      f.id.value = u.id; f.name.value = u.name; f.username.value = u.username; f.username.disabled = true; f.role.value = u.role; f.password.value = ""; f.password.placeholder = "كلمة مرور جديدة (اتركه فارغًا للإبقاء)";
+      fillUserAccounts(u.accountIds || []); f.name.focus();
+    }
+    if (act === "toggle") { await api(`/users/${u.id}`, { method: "PATCH", body: { active: u.active === false } }); await loadUsers(); renderUsersList(); }
+    if (act === "del" && confirm(`حذف المستخدم "${u.name}"؟`)) { await api(`/users/${u.id}`, { method: "DELETE" }); await loadUsers(); renderUsersList(); }
+  } catch (err) { toast(err.message, true); }
 });
 $("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
@@ -518,15 +606,19 @@ socket.on("lead:new", (lead) => {
   if ($("#leads-dialog").open) renderLeads();
   toast(`🔔 استفسار جديد عن ${lead.matched[0]} من ${lead.fromName || lead.from} (${lead.channel === "whatsapp" ? "واتساب" : "إيميل"})`);
 });
+socket.on("chat:assigned", ({ chat, by }) => toast(`👤 ${by} أسند إليك محادثة: ${chat.name || chat.id.split("@")[0]}`));
 socket.on("email:status", () => { if ($("#settings-dialog").open) loadAlertSettings().catch(() => {}); });
 
 
 // ---------- بدء التشغيل ----------
 (async function boot() {
   const auth = await fetch("/api/auth").then((r) => r.json());
-  if (auth.required && !auth.authed) return showLogin();
+  if (auth.setupRequired) { $("#setup").classList.remove("hidden"); return; }
+  if (!auth.user) return showLogin();
+  state.me = auth.user;
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  applyRole();
   state.accounts = await api("/accounts");
   renderAccounts();
   await Promise.all([loadChats(), loadTemplates(), loadLeads()]);

@@ -12,21 +12,35 @@
 <div id="login" class="screen hidden">
   <form id="login-form" class="card">
     <h1>WhatsApp Hub</h1>
-    <p class="muted">أدخل كلمة مرور لوحة التحكم</p>
-    <input id="login-password" type="password" placeholder="كلمة المرور" autocomplete="current-password" />
+    <p class="muted">تسجيل الدخول</p>
+    <input id="login-username" placeholder="اسم المستخدم" autocomplete="username" required />
+    <input id="login-password" type="password" placeholder="كلمة المرور" autocomplete="current-password" required />
     <button class="btn primary" type="submit">دخول</button>
     <p id="login-error" class="error"></p>
+  </form>
+</div>
+
+<div id="setup" class="screen hidden">
+  <form id="setup-form" class="card">
+    <h1>WhatsApp Hub</h1>
+    <p class="muted">الإعداد الأول: أنشئ حساب المدير</p>
+    <input name="name" placeholder="اسمك" required />
+    <input name="username" placeholder="اسم المستخدم (إنجليزي)" autocomplete="username" required />
+    <input name="password" type="password" placeholder="كلمة المرور (6 أحرف على الأقل)" autocomplete="new-password" required />
+    <button class="btn primary" type="submit">إنشاء وبدء الاستخدام</button>
+    <p id="setup-error" class="error"></p>
   </form>
 </div>
 
 <div id="app" class="layout hidden">
   <aside class="sidebar">
     <header class="sidebar-head">
-      <div class="brand"><span class="dot"></span> WhatsApp Hub</div>
+      <div class="brand"><span class="dot"></span> WhatsApp Hub <span id="me-name" class="muted small-text"></span></div>
       <div class="head-actions">
         <button id="btn-leads" class="btn small" title="الاستفسارات">🔔 <span id="leads-count" class="badge hidden"></span></button>
         <button id="btn-settings" class="btn small" title="الإعدادات">⚙️</button>
-        <button id="btn-add" class="btn small">+ إضافة رقم</button>
+        <button id="btn-add" class="btn small admin-only">+ إضافة رقم</button>
+        <button id="btn-logout" class="btn small" title="تسجيل الخروج">⏻</button>
       </div>
     </header>
 
@@ -39,6 +53,11 @@
       <div class="chats-head">
         <h2 id="chats-title">الصندوق الموحّد</h2>
         <input id="chat-search" type="search" placeholder="بحث في المحادثات" />
+        <div class="chat-filters">
+          <button class="cf active" data-f="all">الكل</button>
+          <button class="cf" data-f="mine">محادثاتي</button>
+          <button class="cf" data-f="unassigned">غير مُسندة</button>
+        </div>
       </div>
       <ul id="chats-list"></ul>
     </section>
@@ -57,6 +76,7 @@
           <div id="conv-name" class="conv-name"></div>
           <div id="conv-meta" class="muted small-text"></div>
         </div>
+        <label class="assign">مُسندة إلى <select id="assign-select"><option value="">— لا أحد —</option></select></label>
       </header>
       <div id="messages" class="messages"></div>
       <div id="templates-pop" class="templates-pop hidden"></div>
@@ -143,7 +163,26 @@
       <button class="tab active" data-tab="templates">⚡ الردود الجاهزة</button>
       <button class="tab" data-tab="rules">🤖 الردود التلقائية</button>
       <button class="tab" data-tab="alerts">🔔 تنبيهات الاستفسارات</button>
+      <button class="tab" data-tab="users">👥 المستخدمون</button>
     </div>
+
+    <section id="tab-users" class="tab-panel hidden">
+      <form id="user-form" class="inline-form">
+        <input type="hidden" name="id" />
+        <div class="row">
+          <input name="name" placeholder="اسم الموظف" required />
+          <input name="username" placeholder="اسم المستخدم (إنجليزي)" autocomplete="off" required />
+        </div>
+        <div class="row">
+          <input name="password" type="password" placeholder="كلمة المرور" autocomplete="new-password" />
+          <label>الدور<select name="role"><option value="agent">موظف</option><option value="admin">مدير</option></select></label>
+        </div>
+        <div id="user-accounts" class="checks"></div>
+        <p class="muted small-text">الموظف يرى ويرد على الأرقام المحددة فقط. المدير يرى كل شيء.</p>
+        <div class="dialog-actions"><button class="btn primary" type="submit">حفظ</button><button class="btn" type="button" id="user-reset">جديد</button></div>
+      </form>
+      <ul id="users-list" class="items"></ul>
+    </section>
 
     <section id="tab-alerts" class="tab-panel hidden">
       <form id="alerts-form" class="inline-form">

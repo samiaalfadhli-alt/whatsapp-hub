@@ -136,7 +136,7 @@ export async function processIncoming(input, io) {
     notified: false,
     ...input,
   });
-  io?.emit("lead:new", lead);
+  if (io) (input.channel === "whatsapp" && input.accountId ? io.to(`account:${input.accountId}`).to("admins") : io.to("admins")).emit("lead:new", lead);
 
   const key = `${input.channel}:${input.from}`;
   if (!inCooldown(key, Number(settings.cooldownMinutes) || 0)) {

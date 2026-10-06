@@ -37,7 +37,7 @@ export class AccountManager {
       store.saveAccount({ id: accountId, ...(extra.phone && { phone: extra.phone }), ...(extra.pushName && { pushName: extra.pushName }) });
     }
     const account = store.getAccount(accountId);
-    if (account) this.io.emit("account:update", this.publicAccount(account));
+    if (account) this.io.to(`account:${account.id}`).emit("account:update", this.publicAccount(account));
   }
 
   events(accountId) {
@@ -47,12 +47,12 @@ export class AccountManager {
         const rt = this.runtime.get(accountId) || {};
         this.runtime.set(accountId, { ...rt, qr, status: "qr" });
         const account = store.getAccount(accountId);
-        if (account) this.io.emit("account:update", this.publicAccount(account));
+        if (account) this.io.to(`account:${account.id}`).emit("account:update", this.publicAccount(account));
       },
       onMessage: (message) => {
         const saved = store.addMessage(accountId, message);
-        this.io.emit("message:new", { accountId, message: saved });
-        this.io.emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+        this.io.to(`account:${accountId}`).emit("message:new", { accountId, message: saved });
+        this.io.to(`account:${accountId}`).emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
         if (!message.fromMe) {
           this.runAutoReplies(accountId, saved).catch(() => {});
           if (!message.isGroup) {
@@ -66,13 +66,15 @@ export class AccountManager {
       },
       onStatusUpdate: ({ chatId, messageId, status }) => {
         store.updateMessageStatus(accountId, chatId, messageId, status);
-        this.io.emit("message:status", { accountId, chatId, messageId, status });
+        this.io.to(`account:${accountId}`).emit("message:status", { accountId, chatId, messageId, status });
       },
     };
   }
 
   async addAccount({ label, type = "qr", phoneNumberId, accessToken }) {
     const id = crypto.randomUUID();
+    // المديرون ينضمون لغرفة الرقم الجديد فورًا
+    for (const [, socket] of this.io.sockets.sockets) if (socket.data.user?.role === "admin") socket.join(`account:${id}`);
     const account = store.saveAccount({
       id,
       label: label || "رقم جديد",
@@ -119,7 +121,7 @@ export class AccountManager {
     await this.logout(accountId);
     store.deleteAccount(accountId);
     this.runtime.delete(accountId);
-    this.io.emit("account:removed", { accountId });
+    this.io.to(`account:${accountId}`).emit("account:removed", { accountId });
   }
 
   async sendText(accountId, chatId, text) {
@@ -127,8 +129,8 @@ export class AccountManager {
     if (!provider) throw new Error("الحساب غير متصل");
     const message = await provider.sendText(chatId, text);
     const saved = store.addMessage(accountId, message);
-    this.io.emit("message:new", { accountId, message: saved });
-    this.io.emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+    this.io.to(`account:${accountId}`).emit("message:new", { accountId, message: saved });
+    this.io.to(`account:${accountId}`).emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
     return saved;
   }
 
@@ -137,8 +139,8 @@ export class AccountManager {
     if (!provider) throw new Error("الحساب غير متصل");
     const message = await provider.sendMedia(chatId, file);
     const saved = store.addMessage(accountId, message);
-    this.io.emit("message:new", { accountId, message: saved });
-    this.io.emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
+    this.io.to(`account:${accountId}`).emit("message:new", { accountId, message: saved });
+    this.io.to(`account:${accountId}`).emit("chat:update", { accountId, chat: store.listChats(accountId).find((c) => c.id === message.chatId) });
     return saved;
   }
 
