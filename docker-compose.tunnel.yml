@@ -1,0 +1,22 @@
+# التشغيل على جهاز محلي مع Cloudflare Tunnel (بدون فتح منافذ أو IP ثابت)
+#   docker compose -f docker-compose.tunnel.yml up -d
+services:
+  whatsapp-hub:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      PORT: "3000"
+    volumes:
+      - ./data:/data
+    # لا نفتح أي منفذ للخارج؛ الوصول فقط عبر الـ Tunnel
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - whatsapp-hub

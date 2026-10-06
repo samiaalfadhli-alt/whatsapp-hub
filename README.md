@@ -70,6 +70,8 @@ IMAP_PASS=كلمة-مرور-التطبيق
 > لأي مزود بريد آخر (Outlook، Zoho، بريد الشركة) استخدم بيانات SMTP/IMAP الخاصة به.
 
 ## النشر
+للتشغيل المجاني على جهاز محلي عبر Cloudflare Tunnel: انظر `DEPLOY-TUNNEL.md`.
+
 يعمل على أي خادم Node.js 22+ (VPS / Railway / Render). يُحفظ كل شيء في مجلد `data/` — انسخه عند النقل.
 يمكن تشغيله بشكل دائم عبر `pm2 start src/server.js --name whatsapp-hub`.
 

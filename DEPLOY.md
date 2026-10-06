@@ -15,6 +15,9 @@
 2. أدخل قيم المتغيرات المطلوبة عند الإنشاء.
 3. Disk بمسار `/data` موجود في الـ Blueprint (ضروري).
 
+## 0) جهاز محلي + Cloudflare Tunnel (مجاني)
+انظر `DEPLOY-TUNNEL.md` — الأرخص إن كان لديك جهاز يبقى شغّالًا.
+
 ## 3) VPS (Hetzner / DigitalOcean / أي خادم Linux)
 ```bash
 git clone <repo> && cd atlas/whatsapp-hub
