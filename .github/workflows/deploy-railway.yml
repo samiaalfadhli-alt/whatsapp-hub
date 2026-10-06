@@ -36,19 +36,23 @@ jobs:
           ENV_ID=$(jq -r --arg n "$ENV_NAME" '.data.project.environments.edges[]? | select(.node.name==$n) | .node.id' project.json)
           echo "ENV_ID=$ENV_ID" >> "$GITHUB_ENV"
           test -n "$ENV_ID" || { echo "::error::لم يُعثر على بيئة $ENV_NAME"; exit 1; }
-      - name: Point service at this repository root (main) and clear Root Directory
+      - name: Point service at this repository (main) and clear Root Directory
         env: { RAILWAY_API_TOKEN: "${{ inputs.railway_token }}" }
         run: |
-          m='mutation($s:String!,$e:String!,$in:ServiceInstanceUpdateInput!){ serviceInstanceUpdate(serviceId:$s, environmentId:$e, input:$in) }'
-          curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" \
-            --data "$(jq -n --arg q "$m" --arg s "$SERVICE_ID" --arg e "$ENV_ID" '{query:$q, variables:{s:$s, e:$e, in:{rootDirectory:"/", source:{repo:"samiaalfadhli-alt/whatsapp-hub"}, branch:"main"}}}')" | jq . || true
+          gql() { curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" --data "$1" | jq . || true; }
+          m1='mutation($s:String!,$in:ServiceConnectInput!){ serviceConnect(id:$s, input:$in){ id } }'
+          gql "$(jq -n --arg q "$m1" --arg s "$SERVICE_ID" '{query:$q, variables:{s:$s, in:{repo:"samiaalfadhli-alt/whatsapp-hub", branch:"main"}}}')"
+          m2='mutation($s:String!,$e:String!,$in:ServiceInstanceUpdateInput!){ serviceInstanceUpdate(serviceId:$s, environmentId:$e, input:$in) }'
+          gql "$(jq -n --arg q "$m2" --arg s "$SERVICE_ID" --arg e "$ENV_ID" '{query:$q, variables:{s:$s, e:$e, in:{rootDirectory:"/"}}}')"
+          gql "$(jq -n --arg q "$m2" --arg s "$SERVICE_ID" --arg e "$ENV_ID" '{query:$q, variables:{s:$s, e:$e, in:{rootDirectory:""}}}')"
       - name: Deploy current code with Railway CLI
         env:
           RAILWAY_API_TOKEN: "${{ inputs.railway_token }}"
-          RAILWAY_TOKEN: "${{ inputs.railway_token }}"
         run: |
           npm i -g @railway/cli
-          railway link --project "$PROJECT_ID" --environment "$ENV_NAME" --service "$SERVICE_ID" || railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "$SERVICE_ID"
+          railway whoami || true
+          railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "$SERVICE_ID"
+          railway status || true
           railway up --service "$SERVICE_ID" --environment "$ENV_NAME" --detach
       - name: Wait and verify
         run: |
