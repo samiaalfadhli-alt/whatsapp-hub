@@ -532,8 +532,9 @@ function refreshUserRooms(userId) {
 }
 
 // ---------- الواجهة والأخطاء ----------
-app.use(express.static(path.join(__dirname, "..", "public"), { maxAge: "1h", etag: true }));
-app.get(/^\/(?!api|media|webhooks|socket\.io).*/, (req, res) => res.sendFile(path.join(__dirname, "..", "public", "index.html")));
+// الصفحة الرئيسية بلا تخزين مؤقت حتى تظهر التحديثات فورًا؛ الملفات الثابتة تُخزَّن مع ETag
+app.use(express.static(path.join(__dirname, "..", "public"), { maxAge: "10m", etag: true, index: false, setHeaders: (res, p) => { if (p.endsWith(".html")) res.setHeader("Cache-Control", "no-store"); } }));
+app.get(/^\/(?!api|media|webhooks|socket\.io).*/, (req, res) => { res.setHeader("Cache-Control", "no-store"); res.sendFile(path.join(__dirname, "..", "public", "index.html")); });
 app.use("/api", (req, res) => res.status(404).json({ error: "المسار غير موجود" }));
 app.use((err, req, res, _next) => {
   const status = err.status || (err.code === "LIMIT_FILE_SIZE" ? 413 : 400);
