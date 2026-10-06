@@ -1,0 +1,61 @@
+# نشر يدوي إلى Railway برفع كود المستودع مباشرة (لا يعتمد على ربط المستودع داخل Railway)
+name: Deploy to Railway
+on:
+  workflow_dispatch:
+    inputs:
+      railway_token:
+        description: "Railway account/project token"
+        required: true
+        type: string
+      app_url:
+        description: "رابط التطبيق للتحقق بعد النشر"
+        required: false
+        default: "https://whatsapp-hub-production-d7d5.up.railway.app"
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: 9cdbb04d-6d92-4115-98e0-424f4819e86d
+      SERVICE_ID: 1af9d41e-5f8e-4c8b-99f4-e2b03f4ace0b
+      ENV_NAME: production
+      API: https://backboard.railway.com/graphql/v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Mask token
+        run: echo "::add-mask::${{ inputs.railway_token }}"
+      - name: Inspect project (environments, services, sources)
+        env: { RAILWAY_API_TOKEN: "${{ inputs.railway_token }}" }
+        run: |
+          q='query($id:String!){ project(id:$id){ name environments{edges{node{id name}}} services{edges{node{id name serviceInstances{edges{node{environmentId rootDirectory source{repo branch image} }}}}}} } }'
+          curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" \
+            --data "$(jq -n --arg q "$q" --arg id "$PROJECT_ID" '{query:$q, variables:{id:$id}}')" | tee project.json | jq .
+          ENV_ID=$(jq -r --arg n "$ENV_NAME" '.data.project.environments.edges[] | select(.node.name==$n) | .node.id' project.json)
+          echo "ENV_ID=$ENV_ID" >> "$GITHUB_ENV"
+          test -n "$ENV_ID" || { echo "::error::لم يُعثر على بيئة $ENV_NAME"; exit 1; }
+      - name: Point service at this repository root (main) and clear Root Directory
+        env: { RAILWAY_API_TOKEN: "${{ inputs.railway_token }}" }
+        run: |
+          m='mutation($s:String!,$e:String!,$in:ServiceInstanceUpdateInput!){ serviceInstanceUpdate(serviceId:$s, environmentId:$e, input:$in) }'
+          curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" \
+            --data "$(jq -n --arg q "$m" --arg s "$SERVICE_ID" --arg e "$ENV_ID" '{query:$q, variables:{s:$s, e:$e, in:{rootDirectory:"/", source:{repo:"samiaalfadhli-alt/whatsapp-hub"}, branch:"main"}}}')" | jq . || true
+      - name: Deploy current code with Railway CLI
+        env:
+          RAILWAY_API_TOKEN: "${{ inputs.railway_token }}"
+          RAILWAY_TOKEN: "${{ inputs.railway_token }}"
+        run: |
+          npm i -g @railway/cli
+          railway link --project "$PROJECT_ID" --environment "$ENV_NAME" --service "$SERVICE_ID" || railway link -p "$PROJECT_ID" -e "$ENV_NAME" -s "$SERVICE_ID"
+          railway up --service "$SERVICE_ID" --environment "$ENV_NAME" --detach
+      - name: Wait and verify
+        run: |
+          for i in $(seq 1 30); do
+            sleep 10
+            body=$(curl -s -m 15 "${{ inputs.app_url }}/api/auth" || true)
+            echo "try $i: $body"
+            if echo "$body" | grep -q '"user"'; then echo "✅ النسخة الجديدة تعمل"; exit 0; fi
+          done
+          echo "::warning::لم يستجب التطبيق بالصيغة الجديدة بعد 5 دقائق — راجعي Deploy Logs في Railway"
