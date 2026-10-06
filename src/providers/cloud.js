@@ -105,11 +105,16 @@ export class CloudApiProvider {
         m.document?.filename ||
         (m.image && "📷 صورة") ||
         (m.audio && "🎤 رسالة صوتية") ||
-        (m.location && "📍 موقع") ||
+        (m.video && "🎬 فيديو") ||
+        (m.sticker && "🩵 ملصق") ||
+        (m.contacts && `👤 جهة اتصال: ${m.contacts[0]?.name?.formatted_name || ""}`) ||
+        (m.location && `📍 موقع${m.location.name ? ": " + m.location.name : ""} (https://maps.google.com/?q=${m.location.latitude},${m.location.longitude})`) ||
+        (m.order && "🧾 طلب") ||
         m.button?.text ||
         m.interactive?.button_reply?.title ||
         m.interactive?.list_reply?.title ||
-        "[رسالة غير مدعومة]";
+        (m.reaction ? null : `[unsupported:${m.type || "unknown"}]`);
+      if (text === null) continue; // تفاعل — ليس رسالة
       const mediaObj = m.image || m.video || m.audio || m.document || m.sticker;
       const mediaType = m.image ? "image" : m.video ? "video" : m.audio ? "audio" : m.document ? "document" : m.sticker ? "sticker" : null;
       let media;

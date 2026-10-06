@@ -16,6 +16,7 @@ const makeWASocket = baileys.default ?? baileys;
 const logger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" });
 
 export class BaileysProvider {
+  static unknownTypes = new Set();
   constructor(account, events) {
     this.account = account;
     this.events = events; // { onStatus, onQr, onMessage, onStatusUpdate }
@@ -134,7 +135,8 @@ export class BaileysProvider {
     }
     const type = getContentType(content);
     // أحداث ليست رسائل للمستخدم
-    if (!type || ["protocolMessage", "senderKeyDistributionMessage", "messageContextInfo", "reactionMessage", "keepInMessage", "pinInChatMessage", "encReactionMessage", "pollUpdateMessage"].includes(type)) return null;
+    if (!type || ["protocolMessage", "senderKeyDistributionMessage", "messageContextInfo", "reactionMessage", "keepInMessage", "pinInChatMessage", "encReactionMessage", "pollUpdateMessage",
+      "albumMessage", "placeholderMessage", "encCommentMessage", "botInvokeMessage", "statusMentionMessage", "groupStatusMentionMessage", "pollResultSnapshotMessage", "newsletterAdminInviteMessage", "secretEncryptedMessage"].includes(type)) return null;
 
     const img = content.imageMessage, vid = content.videoMessage, aud = content.audioMessage, doc = content.documentMessage, stk = content.stickerMessage, ptv = content.ptvMessage;
     const loc = content.locationMessage || content.liveLocationMessage;
@@ -164,9 +166,22 @@ export class BaileysProvider {
       (content.groupInviteMessage && `🔗 دعوة مجموعة: ${content.groupInviteMessage.groupName || ""}`) ||
       (content.eventMessage && `📅 حدث: ${content.eventMessage.name || ""}`) ||
       (content.callLogMessage && "📞 مكالمة") ||
+      (content.scheduledCallCreationMessage && `📞 مكالمة مجدولة${content.scheduledCallCreationMessage.title ? ": " + content.scheduledCallCreationMessage.title : ""}`) ||
       (content.requestPaymentMessage && "💳 طلب دفع") ||
+      (content.lottieStickerMessage && "🩵 ملصق متحرك") ||
+      (content.stickerPackMessage && "🩵 حزمة ملصقات") ||
+      (content.eventResponseMessage && "📅 رد على حدث") ||
+      (content.commentMessage && (normalizeMessageContent(content.commentMessage.message)?.conversation || "💬 تعليق")) ||
+      (content.requestPhoneNumberMessage && "📱 طلب رقم الهاتف") ||
+      (content.bcallMessage && "📞 مكالمة") ||
+      (content.highlyStructuredMessage && (content.highlyStructuredMessage.hydratedHsm?.hydratedTemplate?.hydratedContentText || "📄 رسالة قالب")) ||
+      (content.viewOnceMessage && "👁️ رسالة عرض لمرة واحدة") ||
       "";
-    if (!text) text = `[${type.replace(/Message$/, "")}]`;
+    if (!text) {
+      // نوع غير معروف: نحتفظ بالاسم للتشخيص ونعرضه كملاحظة نظام
+      if (!BaileysProvider.unknownTypes.has(type)) { BaileysProvider.unknownTypes.add(type); console.warn(`[whatsapp] نوع رسالة غير مدعوم: ${type}`); }
+      text = `[unsupported:${type.replace(/Message$/, "")}]`;
+    }
     if (editedId) text = `${text} (معدّلة)`;
     const mediaType = img ? "image" : vid || ptv ? "video" : aud ? "audio" : doc ? "document" : stk ? "sticker" : null;
     return {

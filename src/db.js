@@ -158,6 +158,12 @@ const migrations = [
   ALTER TABLE conversations ADD COLUMN ref TEXT;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_ref ON conversations(ref);
   `,
+  // v3: توحيد الرسائل القديمة المخزّنة بنص "غير مدعومة" أو "[type]" إلى علامة موحّدة
+  `
+  UPDATE messages SET text = '[unsupported:legacy]' WHERE text = '[رسالة غير مدعومة]';
+  UPDATE messages SET text = '[unsupported:' || substr(text, 2) WHERE text GLOB '[[a-zA-Z]*]' AND text NOT LIKE '[unsupported:%';
+  UPDATE conversations SET last_message = 'رسالة غير مدعومة' WHERE last_message = '[رسالة غير مدعومة]' OR last_message GLOB '[[a-zA-Z]*]';
+  `,
 ];
 
 db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)");

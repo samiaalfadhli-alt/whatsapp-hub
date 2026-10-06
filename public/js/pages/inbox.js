@@ -69,7 +69,10 @@ export async function render(view, [ref]) {
   // ---------- المحادثة ----------
   const chat = $("[data-chat]", el); const ctx = $("[data-ctx]", el);
   bindMedia(chat);
+  const UNSUP = { legacy: "رسالة لم يُمكن عرضها (وصلت قبل تحديث النظام)", unknown: "نوع غير معروف" };
   function msgHtml(m) {
+    const un = /^\[unsupported:(.+)\]$/.exec(m.text || "");
+    if (un && !m.mediaType) return `<div class="msg sys" data-id="${esc(m.id)}" data-ts="${m.timestamp}" title="${esc(un[1])}">⚙️ ${esc(UNSUP[un[1]] || "رسالة من نوع غير مدعوم في العرض")} <span class="small">${fmtTime(m.timestamp)}</span></div>`;
     const st = m.fromMe ? MSG_STATUS[m.status] || ["", ""] : ["", ""];
     const tick = m.fromMe ? `<span class="tick ${m.status === "read" || m.status === "played" ? "read" : m.status === "failed" ? "failed" : ""}" title="${st[1]}">${st[0]}</span>` : "";
     const hideText = m.mediaType && m.media?.url && (/^(📷 صورة|🎬 فيديو|🎤 رسالة صوتية|🎵 مقطع صوتي|🩵 ملصق|🎥 رسالة فيديو|📄 ملف)$/.test(m.text || "") || (m.mediaType === "document" && (m.text === m.media.fileName || m.text === m.media.caption)));

@@ -151,6 +151,7 @@ function insertRaw(accountId, m) {
     m.sender || "", m.isGroup ? 1 : 0, m.edited ? 1 : 0, m.key ? J(m.key) : null, m.campaignId || null, m.sentBy || null, now());
   writeMedia(accountId, m);
 }
+export const previewText = (t) => (/^\[unsupported:/.test(t || "") ? "رسالة غير مدعومة" : (t || "").slice(0, 120));
 export function addMessage(accountId, message) {
   const existing = db.prepare("SELECT id FROM messages WHERE account_id = ? AND id = ?").get(accountId, message.id);
   if (existing) {
@@ -165,7 +166,7 @@ export function addMessage(accountId, message) {
       : (cur.status === "new" ? "new" : "waiting");
     upsertChat(accountId, {
       id: message.chatId, name: cur?.name || message.chatName || undefined,
-      lastMessage: (message.text || "").slice(0, 120), lastTimestamp: message.timestamp,
+      lastMessage: previewText(message.text), lastTimestamp: message.timestamp,
       unread: message.fromMe ? 0 : (cur?.unread || 0) + 1, status: nextStatus, closedAt: nextStatus === "closed" ? undefined : null,
     });
     if (!message.isGroup) {
@@ -200,7 +201,7 @@ export function importHistory(accountId, messages) {
       const newer = !cur || m.timestamp >= (cur.last_timestamp || 0);
       upsertChat(accountId, {
         id: chatId, name: cur?.name || m.chatName || undefined,
-        lastMessage: newer ? (m.text || "").slice(0, 120) : undefined, lastTimestamp: newer ? m.timestamp : undefined,
+        lastMessage: newer ? previewText(m.text) : undefined, lastTimestamp: newer ? m.timestamp : undefined,
         unread: cur?.unread ?? 0, status: cur?.status || (m.fromMe ? "replied" : "waiting"),
       });
     }

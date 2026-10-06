@@ -7,6 +7,8 @@ import * as store from "./store.js";
 import { ensureRoles } from "./users.js";
 
 const readJson = (f, fb) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return fb; } };
+// نصوص الرسائل غير المدعومة بالصيغة القديمة → علامة موحّدة
+const fixText = (t = "") => (t === "[رسالة غير مدعومة]" ? "[unsupported:legacy]" : /^\[[a-zA-Z]+\]$/.test(t) ? `[unsupported:${t.slice(1)}` : t);
 
 export function migrateFromJson() {
   if (getSetting("json_migrated")) return null;
@@ -26,11 +28,11 @@ export function migrateFromJson() {
         const dir = path.join(msgDir, accountId);
         if (!fs.statSync(dir).isDirectory()) continue;
         const chats = readJson(path.join(dir, "chats.json"), []);
-        for (const c of chats) { store.upsertChat(accountId, { id: c.id, name: c.name, lastMessage: c.lastMessage, lastTimestamp: c.lastTimestamp, unread: c.unread || 0, assignedTo: c.assignedTo, assignedName: c.assignedName, status: c.unread ? "new" : "replied" }); report.chats++; }
+        for (const c of chats) { store.upsertChat(accountId, { id: c.id, name: c.name, lastMessage: store.previewText(fixText(c.lastMessage)), lastTimestamp: c.lastTimestamp, unread: c.unread || 0, assignedTo: c.assignedTo, assignedName: c.assignedName, status: c.unread ? "new" : "replied" }); report.chats++; }
         for (const f of fs.readdirSync(dir)) {
           if (f === "chats.json" || !f.endsWith(".json")) continue;
           const msgs = readJson(path.join(dir, f), []);
-          report.messages += store.importHistory(accountId, msgs.map((m) => ({ ...m, media: m.media ? { ...m.media, state: "ready" } : undefined })));
+          report.messages += store.importHistory(accountId, msgs.map((m) => ({ ...m, text: fixText(m.text), media: m.media ? { ...m.media, state: "ready" } : undefined })));
         }
       }
     }
