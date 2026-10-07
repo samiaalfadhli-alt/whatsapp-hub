@@ -1,0 +1,44 @@
+# فحص حالة آخر نشر على Railway والتحقق من الرابط (لا ينشر شيئًا)
+name: Check Railway
+on:
+  workflow_dispatch:
+    inputs:
+      railway_token: { description: "Railway token", required: true, type: string }
+      app_url: { description: "App URL", required: false, default: "https://whatsapp-hub-production-d7d5.up.railway.app", type: string }
+      minutes: { description: "مدة الانتظار بالدقائق", required: false, default: "12", type: string }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      SERVICE_ID: 1af9d41e-5f8e-4c8b-99f4-e2b03f4ace0b
+      ENV_ID: ce310db0-128d-4d9d-b4ae-adb5d78b255c
+      API: https://backboard.railway.com/graphql/v2
+    steps:
+      - run: echo "::add-mask::${{ inputs.railway_token }}"
+      - name: Poll deployments + app
+        env: { RAILWAY_API_TOKEN: "${{ inputs.railway_token }}" }
+        run: |
+          q='query($s:String!,$e:String!){ deployments(first:4, input:{serviceId:$s, environmentId:$e}){ edges{ node{ id status createdAt meta } } } }'
+          tries=$(( ${{ inputs.minutes }} * 4 ))
+          for i in $(seq 1 $tries); do
+            echo "=== $i"
+            curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" \
+              --data "$(jq -n --arg q "$q" --arg s "$SERVICE_ID" --arg e "$ENV_ID" '{query:$q, variables:{s:$s,e:$e}}')" \
+              | jq -c '.data.deployments.edges[]?.node | {id, status, createdAt, repo: .meta.repo, branch: .meta.branch, commit: (.meta.commitHash // .meta.commitMessage)}' || true
+            body=$(curl -s -m 15 "${{ inputs.app_url }}/api/auth" || true); echo "app: $body"
+            if echo "$body" | grep -q '"user"'; then echo "✅ النسخة الجديدة تعمل"; exit 0; fi
+            sleep 15
+          done
+          echo "::warning::لم تظهر النسخة الجديدة بعد"
+      - name: Last deployment build log (on failure)
+        if: always()
+        env: { RAILWAY_API_TOKEN: "${{ inputs.railway_token }}" }
+        run: |
+          q='query($s:String!,$e:String!){ deployments(first:1, input:{serviceId:$s, environmentId:$e}){ edges{ node{ id status } } } }'
+          DID=$(curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" --data "$(jq -n --arg q "$q" --arg s "$SERVICE_ID" --arg e "$ENV_ID" '{query:$q, variables:{s:$s,e:$e}}')" | jq -r '.data.deployments.edges[0].node.id')
+          echo "deployment: $DID"
+          for kind in buildLogs deploymentLogs; do
+            echo "--- $kind"
+            lq="query(\$id:String!){ $kind(deploymentId:\$id, limit:120){ message severity } }"
+            curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" --data "$(jq -n --arg q "$lq" --arg id "$DID" '{query:$q, variables:{id:$id}}')" | jq -r '.data[]?[]? | .message' | tail -80 || true
+          done
