@@ -39,6 +39,6 @@ jobs:
           echo "deployment: $DID"
           for kind in buildLogs deploymentLogs; do
             echo "--- $kind"
-            lq="query(\$id:String!){ $kind(deploymentId:\$id, limit:120){ message severity } }"
-            curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" --data "$(jq -n --arg q "$lq" --arg id "$DID" '{query:$q, variables:{id:$id}}')" | jq -r '.data[]?[]? | .message' | tail -80 || true
+            lq="query(\$id:String!){ $kind(deploymentId:\$id, limit:600){ message severity } }"
+            curl -sS "$API" -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" --data "$(jq -n --arg q "$lq" --arg id "$DID" '{query:$q, variables:{id:$id}}')" | jq -r '.data[]?[]? | .message' | tail -150 || true
           done
